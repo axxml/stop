@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import argparse
+import sys
+
+try:
+    import yfinance
+
+    HAS_YFINANCE = True
+except ImportError:
+    HAS_YFINANCE = False
+
+
+class ConfigError(Exception):
+    """ Configuration error class """
+
+    def __init__(self, message):
+        sys.stderr.write("%s: configuration error: %s\n" % (__program__, message))
+
+        sys.exit(2)
+
+
+def main():
+    if not HAS_YFINANCE:
+        raise ConfigError("yfinance (https://github.com/ranaroussi/yfinance) is mandatory for the run")
+
+    parser = argparse.ArgumentParser(description='Stock status')
+
+
+if __name__ == "__main__":
+    main()
