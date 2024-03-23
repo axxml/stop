@@ -39,14 +39,25 @@ class Checker(object):
     def __init__(self, tickers):
         self.delay = 0
         self.current = None
-        self.tickers = yfinance.Tickers(tickers)
-        self.cycled = cycle(list(self.tickers.tickers.values()))
-        self.exit = Event()
+        self.tickers = None
+        self.exit = None
 
-        self.cycle()
+        self.init(tickers)
 
         signal.signal(signal.SIGUSR1, self.cycle)
         signal.siginterrupt(signal.SIGUSR1, False)
+
+    def init(self, tickers):
+        ticker_list = list(yfinance.Tickers(tickers).tickers.values())
+
+        for ticker in ticker_list:
+            if ticker.history().empty:
+                raise ConfigError("failed to load initial ticker history: {}".format(ticker.ticker))
+
+        self.tickers = cycle(ticker_list)
+        self.exit = Event()
+
+        self.cycle()
 
     def run(self):
         while True:
@@ -72,7 +83,7 @@ class Checker(object):
                 self.exit.wait(self.delay)
 
     def cycle(self, *args):
-        self.current = next(self.cycled)
+        self.current = next(self.tickers)
         self.exit.set()
 
 
