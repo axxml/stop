@@ -2,7 +2,12 @@
 # -*- coding: utf-8 -*-
 
 import argparse
+import os
+import signal
 import sys
+
+from itertools import cycle
+from threading import Event
 
 try:
     import yfinance
@@ -10,6 +15,14 @@ try:
     HAS_YFINANCE = True
 except ImportError:
     HAS_YFINANCE = False
+
+
+__program__ = os.path.basename(sys.argv[0])
+__version__ = "0.1.0-stable"  # major.minor.revision-channel
+__author__ = "Axel McLaren <scm@axml.uk>"
+
+
+_DEFAULT_DELAY = 5.0 # seconds
 
 
 class ConfigError(Exception):
@@ -21,11 +34,71 @@ class ConfigError(Exception):
         sys.exit(2)
 
 
+class Checker(object):
+
+    def __init__(self, tickers):
+        self.delay = 0
+        self.current = None
+        self.tickers = yfinance.Tickers(tickers)
+        self.cycled = cycle(list(self.tickers.tickers.values()))
+        self.exit = Event()
+
+        self.cycle()
+
+        signal.signal(signal.SIGUSR1, self.cycle)
+        signal.siginterrupt(signal.SIGUSR1, False)
+
+    def run(self):
+        while True:
+            self.exit.clear()
+
+            while not self.exit.is_set():
+                ticker = self.current.ticker
+                data = self.current.history(period="1mo", interval="1d")
+
+                val = '{:.2f}'.format(data['Close'][-1])
+                diff = data.diff()[-2:]['Close'][-1]
+
+                if diff > 0:
+                    diff = '[%{{F#55aa55}}+{:.2f}%{{F-}}]'.format(diff)
+                else:
+                    diff = '[%{{F#ff5555}}{:.2f}%{{F-}}]'.format(diff)
+
+                output = "%{{B#000}}%{{u#222}}%{{+u}}%{{o#222}}%{{+o}} {} %{{-o}}%{{-u}}%{{B-}} {} {}".format(ticker, val, diff)
+
+                sys.stdout.write("{}\n".format(output))
+                sys.stdout.flush()
+
+                self.exit.wait(self.delay)
+
+    def cycle(self, *args):
+        self.current = next(self.cycled)
+        self.exit.set()
+
+
 def main():
     if not HAS_YFINANCE:
         raise ConfigError("yfinance (https://github.com/ranaroussi/yfinance) is mandatory for the run")
 
     parser = argparse.ArgumentParser(description='Stock status')
+
+    parser.add_argument("-d", "--delay", type=float,
+                        default=_DEFAULT_DELAY,
+                        help="delay between checks")
+    parser.add_argument("ticker", type=str, nargs='+',
+                        help="ticker list")
+
+    args = parser.parse_args()
+
+    checker = Checker(args.ticker)
+    checker.delay = args.delay
+
+    try:
+        checker.run()
+    except KeyboardInterrupt:
+        sys.stderr.write("aborted by the operator\n")
+
+        sys.exit(2)
 
 
 if __name__ == "__main__":
