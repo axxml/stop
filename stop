@@ -91,7 +91,7 @@ def main():
     if not HAS_YFINANCE:
         raise ConfigError("yfinance (https://github.com/ranaroussi/yfinance) is mandatory for the run")
 
-    parser = argparse.ArgumentParser(description='Stock status')
+    parser = argparse.ArgumentParser(description='Stock position tracker for status bars')
 
     parser.add_argument("-d", "--delay", type=float,
                         default=_DEFAULT_DELAY,
