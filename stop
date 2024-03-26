@@ -22,7 +22,17 @@ __version__ = "0.1.1-dev"  # major.minor.revision-channel
 __author__ = "Axel McLaren <scm@axml.uk>"
 
 
-_DEFAULT_DELAY = 5.0 # seconds
+_DEFAULT_DELAY = 5.0  # seconds
+_DEFAULT_ROUNDING = 2
+_DEFAULT_COLOR = {
+    'background': '#222222',
+    'foreground': '#e7e7e7',
+    'highlight': '#000000',
+    'gain': '#55aa55',
+    'loss': '#ff5555'
+}
+
+_FORMAT_POLYBAR = "%{{B{}}}%{{F{}}}%{{u{}}}%{{+u}}%{{o{}}}%{{+o}} {} %{{-o}}%{{-u}}%{{F-}}%{{B-}}%{{B{}}} {} [%{{F{}}}{}%{{F-}}]%{{B-}}"
 
 
 class ConfigError(Exception):
@@ -36,8 +46,10 @@ class ConfigError(Exception):
 
 class Checker(object):
 
-    def __init__(self, tickers):
+    def __init__(self, tickers, rounding):
         self.delay = 0
+        self.rounded = '{{:.{:d}f}}'.format(rounding)
+        self.colors = None
         self.current = None
         self.tickers = None
         self.exit = None
@@ -59,6 +71,22 @@ class Checker(object):
 
         self.cycle()
 
+    def decorate(self, bg, fg, hl, ga, lo):
+        colors = {
+            'background': bg,
+            'foreground': fg,
+            'highlight': hl,
+            'gain': ga,
+            'loss': lo
+        }
+
+        # normalize color codes
+        colors.update((k, v if v[0] == '#' else '#' + v) for k, v in colors.items())
+
+        Colors = type('Colors', (object,), colors)
+
+        self.colors = Colors()
+
     def run(self):
         while True:
             self.exit.clear()
@@ -67,15 +95,25 @@ class Checker(object):
                 ticker = self.current.ticker
                 data = self.current.history(period="1mo", interval="1d")
 
-                val = '{:.2f}'.format(data['Close'][-1])
+                val = data['Close'][-1]
                 diff = data.diff()[-2:]['Close'][-1]
 
-                if diff > 0:
-                    diff = '[%{{F#55aa55}}+{:.2f}%{{F-}}]'.format(diff)
+                if self.colors is None:
+                    output = " {}  {} [{}]".format(ticker,
+                                                   self.rounded.format(val),
+                                                   self.rounded.format(diff))
                 else:
-                    diff = '[%{{F#ff5555}}{:.2f}%{{F-}}]'.format(diff)
+                    diff_color = self.colors.gain if diff > 0 else self.colors.loss
 
-                output = "%{{B#000}}%{{u#222}}%{{+u}}%{{o#222}}%{{+o}} {} %{{-o}}%{{-u}}%{{B-}} {} {}".format(ticker, val, diff)
+                    output = _FORMAT_POLYBAR.format(self.colors.highlight,
+                                                    self.colors.foreground,
+                                                    self.colors.background,
+                                                    self.colors.background,
+                                                    ticker,
+                                                    self.colors.background,
+                                                    self.rounded.format(val),
+                                                    diff_color,
+                                                    self.rounded.format(diff))
 
                 sys.stdout.write("{}\n".format(output))
                 sys.stdout.flush()
@@ -96,13 +134,36 @@ def main():
     parser.add_argument("-d", "--delay", type=float,
                         default=_DEFAULT_DELAY,
                         help="delay between checks")
+    parser.add_argument("-bg", "--background", type=str,
+                        default=_DEFAULT_COLOR['background'],
+                        help="background color")
+    parser.add_argument("-fg", "--foreground", type=str,
+                        default=_DEFAULT_COLOR['foreground'],
+                        help="foreground color")
+    parser.add_argument("-hl", "--highlight", type=str,
+                        default=_DEFAULT_COLOR['highlight'],
+                        help="ticker highlight color")
+    parser.add_argument("-ga", "--gain", type=str,
+                        default=_DEFAULT_COLOR['gain'],
+                        help="gain accent color")
+    parser.add_argument("-lo", "--loss", type=str,
+                        default=_DEFAULT_COLOR['loss'],
+                        help="loss accent color")
+    parser.add_argument("-p", "--plain", action='store_true',
+                        help="disable polybar formatting")
+    parser.add_argument("-r", "--rounding", type=int, choices=range(0, 14),
+                        default=_DEFAULT_ROUNDING,
+                        help="delay between checks")
     parser.add_argument("ticker", type=str, nargs='+',
                         help="ticker list")
 
     args = parser.parse_args()
 
-    checker = Checker(args.ticker)
+    checker = Checker(args.ticker, args.rounding)
     checker.delay = args.delay
+
+    if not args.plain:
+        checker.decorate(args.background, args.foreground, args.highlight, args.gain, args.loss)
 
     try:
         checker.run()
