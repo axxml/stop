@@ -48,10 +48,9 @@ class ConfigError(Exception):
 
 class Checker(object):
 
-    def __init__(self, tickers, rounding):
-        self.delay = 0
+    def __init__(self, tickers, rounding=_DEFAULT_ROUNDING):
         self.rounded = '{{:.{:d}f}}'.format(rounding)
-        self.opener = None
+        self.opener = _DEFAULT_OPENER
         self.colors = None
         self.current = None
         self.tickers = None
@@ -90,7 +89,7 @@ class Checker(object):
 
         self.colors = Colors()
 
-    def run(self):
+    def run(self, delay=_DEFAULT_DELAY):
         while True:
             self.exit.clear()
 
@@ -123,7 +122,7 @@ class Checker(object):
                 sys.stdout.write("{}\n".format(output))
                 sys.stdout.flush()
 
-                self.exit.wait(self.delay)
+                self.exit.wait(delay)
 
     def cycle(self, *args):
         self.current = next(self.tickers)
@@ -170,14 +169,13 @@ def main():
     args = parser.parse_args()
 
     checker = Checker(args.ticker, args.rounding)
-    checker.delay = args.delay
-    checker.opener = args.opener
 
     if not args.plain:
         checker.decorate(args.background, args.foreground, args.highlight, args.gain, args.loss)
+        checker.opener = args.opener
 
     try:
-        checker.run()
+        checker.run(args.delay)
     except KeyboardInterrupt:
         sys.stderr.write("aborted by the operator\n")
 
