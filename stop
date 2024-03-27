@@ -31,8 +31,10 @@ _DEFAULT_COLOR = {
     'gain': '#55aa55',
     'loss': '#ff5555'
 }
+_DEFAULT_OPENER = "xdg-open"
 
-_FORMAT_POLYBAR = "%{{B{}}}%{{F{}}}%{{u{}}}%{{+u}}%{{o{}}}%{{+o}} {} %{{-o}}%{{-u}}%{{F-}}%{{B-}}%{{B{}}} {} [%{{F{}}}{}%{{F-}}]%{{B-}}"
+_FORMAT_POLYBAR = "%{{A3:{} \"{}\":}}%{{B{}}}%{{F{}}}%{{u{}}}%{{+u}}%{{o{}}}%{{+o}} {} %{{-o}}%{{-u}}%{{F-}}%{{B-}}%{{B{}}} {} [%{{F{}}}{}%{{F-}}]%{{B-}}%{{A}}"
+_QUOTE_URL = "https\\://finance.yahoo.com/quote/"
 
 
 class ConfigError(Exception):
@@ -49,6 +51,7 @@ class Checker(object):
     def __init__(self, tickers, rounding):
         self.delay = 0
         self.rounded = '{{:.{:d}f}}'.format(rounding)
+        self.opener = None
         self.colors = None
         self.current = None
         self.tickers = None
@@ -105,7 +108,9 @@ class Checker(object):
                 else:
                     diff_color = self.colors.gain if diff > 0 else self.colors.loss
 
-                    output = _FORMAT_POLYBAR.format(self.colors.highlight,
+                    output = _FORMAT_POLYBAR.format(self.opener,
+                                                    _QUOTE_URL + ticker,
+                                                    self.colors.highlight,
                                                     self.colors.foreground,
                                                     self.colors.background,
                                                     self.colors.background,
@@ -149,6 +154,9 @@ def main():
     parser.add_argument("-lo", "--loss", type=str,
                         default=_DEFAULT_COLOR['loss'],
                         help="loss accent color")
+    parser.add_argument("-o", "--opener", type=str,
+                        default=_DEFAULT_OPENER,
+                        help="quote URL opener")
     parser.add_argument("-p", "--plain", action='store_true',
                         help="disable polybar formatting")
     parser.add_argument("-r", "--rounding", type=int, choices=range(0, 14),
@@ -163,6 +171,7 @@ def main():
 
     checker = Checker(args.ticker, args.rounding)
     checker.delay = args.delay
+    checker.opener = args.opener
 
     if not args.plain:
         checker.decorate(args.background, args.foreground, args.highlight, args.gain, args.loss)
