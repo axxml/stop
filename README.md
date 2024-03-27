@@ -27,6 +27,7 @@ Supported configuration options:
     - loss accent
 - plaintext mode
 - decimal rounding
+- custom URL opener
 
 See `stop -h` for more info.
 
@@ -38,7 +39,7 @@ type = custom/script
 exec = stop NVDA MSFT
 tail = true
 
-label = %output:-129%
+label = %output:-188%
 
 click-left = kill -USR1 %pid%
 ```
