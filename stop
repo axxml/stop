@@ -105,15 +105,29 @@ class Checker(object):
                 ticker = self.current.ticker
                 data = self.current.history(period="1mo", interval="1d")
 
-                val = data['Close'][-1]
-                diff = data.diff()[-2:]['Close'][-1]
+                if data.empty is True:
+                    val = "ERROR"
+                    diff = "N/A"
+                else:
+                    val = data['Close'][-1]
+                    diff = data.diff()[-2:]['Close'][-1]
 
                 if self.colors is None:
-                    output = " {}  {} [{}]".format(ticker,
-                                                   self.rounded.format(val),
-                                                   self.rounded_diff.format(diff))
+                    if data.empty is True:
+                        output = " {}  {} [{}]".format(ticker, val, diff)
+                    else:
+                        output = " {}  {} [{}]".format(ticker,
+                                                       self.rounded.format(val),
+                                                       self.rounded_diff.format(diff))
                 else:
-                    diff_color = self.colors.gain if diff > 0 else self.colors.loss
+                    if data.empty is True:
+                        rounded = val
+                        rounded_diff = diff
+                        diff_color = self.colors.loss
+                    else:
+                        rounded = self.rounded.format(val)
+                        rounded_diff = self.rounded_diff.format(diff)
+                        diff_color = self.colors.gain if diff > 0 else self.colors.loss
 
                     output = _FORMAT_POLYBAR.format(self.opener,
                                                     _QUOTE_URL + ticker,
@@ -123,9 +137,9 @@ class Checker(object):
                                                     self.colors.background,
                                                     ticker,
                                                     self.colors.background,
-                                                    self.rounded.format(val),
+                                                    rounded,
                                                     diff_color,
-                                                    self.rounded_diff.format(diff))
+                                                    rounded_diff)
 
                 sys.stdout.write("{}\n".format(output))
                 sys.stdout.flush()
