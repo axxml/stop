@@ -26,6 +26,7 @@ Supported configuration options:
     - gain accent
     - loss accent
 - plaintext mode
+- one-shot mode
 - decimal rounding
 - custom URL opener
 

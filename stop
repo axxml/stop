@@ -97,53 +97,64 @@ class Checker(object):
 
         self.colors = Colors()
 
+    def fetch(self):
+        ticker = self.current.ticker
+        data = self.current.history(period="1mo", interval="1d")
+
+        if data.empty is True:
+            val = "ERROR"
+            diff = "N/A"
+        else:
+            val = data['Close'][-1]
+            diff = data.diff()[-2:]['Close'][-1]
+
+            if str(diff) == 'nan':
+                diff = "N/A"
+
+        if data.empty is True or isinstance(diff, str):
+            formatted_diff = diff
+        else:
+            formatted_diff = self.rounded_diff.format(diff)
+
+        if self.colors is None:
+            if data.empty is True:
+                output = " {}  {} [{}]".format(ticker, val, diff)
+            else:
+                output = " {}  {} [{}]".format(ticker,
+                                               self.rounded.format(val),
+                                               formatted_diff)
+        else:
+            if data.empty is True:
+                rounded = val
+            else:
+                rounded = self.rounded.format(val)
+
+            if data.empty is True or isinstance(diff, str):
+                diff_color = self.colors.foreground if isinstance(diff, str) else self.colors.loss
+            else:
+                diff_color = self.colors.gain if diff > 0 else self.colors.loss
+
+            output = _FORMAT_POLYBAR.format(self.opener,
+                                            _QUOTE_URL + ticker,
+                                            self.colors.highlight,
+                                            self.colors.foreground,
+                                            self.colors.background,
+                                            self.colors.background,
+                                            ticker,
+                                            self.colors.background,
+                                            rounded,
+                                            diff_color,
+                                            formatted_diff)
+
+        sys.stdout.write("{}\n".format(output))
+        sys.stdout.flush()
+
     def run(self, delay=_DEFAULT_DELAY):
         while True:
             self.exit.clear()
 
             while not self.exit.is_set():
-                ticker = self.current.ticker
-                data = self.current.history(period="1mo", interval="1d")
-
-                if data.empty is True:
-                    val = "ERROR"
-                    diff = "N/A"
-                else:
-                    val = data['Close'][-1]
-                    diff = data.diff()[-2:]['Close'][-1]
-
-                if self.colors is None:
-                    if data.empty is True:
-                        output = " {}  {} [{}]".format(ticker, val, diff)
-                    else:
-                        output = " {}  {} [{}]".format(ticker,
-                                                       self.rounded.format(val),
-                                                       self.rounded_diff.format(diff))
-                else:
-                    if data.empty is True:
-                        rounded = val
-                        rounded_diff = diff
-                        diff_color = self.colors.loss
-                    else:
-                        rounded = self.rounded.format(val)
-                        rounded_diff = self.rounded_diff.format(diff)
-                        diff_color = self.colors.gain if diff > 0 else self.colors.loss
-
-                    output = _FORMAT_POLYBAR.format(self.opener,
-                                                    _QUOTE_URL + ticker,
-                                                    self.colors.highlight,
-                                                    self.colors.foreground,
-                                                    self.colors.background,
-                                                    self.colors.background,
-                                                    ticker,
-                                                    self.colors.background,
-                                                    rounded,
-                                                    diff_color,
-                                                    rounded_diff)
-
-                sys.stdout.write("{}\n".format(output))
-                sys.stdout.flush()
-
+                self.fetch()
                 self.exit.wait(delay)
 
     def cycle(self, *args):
@@ -183,6 +194,8 @@ def main():
     parser.add_argument("-r", "--rounding", type=int, choices=range(0, 14),
                         default=_DEFAULT_ROUNDING,
                         help="decimal rounding")
+    parser.add_argument("-s", "--one-shot", action='store_true',
+                        help="run once and exit")
     parser.add_argument("-v", "--version", action='version',
                         version='%(prog)s {0} by {1}'.format(__version__, __author__))
     parser.add_argument("ticker", type=str, nargs='+',
@@ -196,12 +209,15 @@ def main():
         checker.decorate(args.background, args.foreground, args.highlight, args.gain, args.loss)
         checker.opener = args.opener
 
-    try:
-        checker.run(args.delay)
-    except KeyboardInterrupt:
-        sys.stderr.write("aborted by the operator\n")
+    if not args.one_shot:
+        try:
+            checker.run(args.delay)
+        except KeyboardInterrupt:
+            sys.stderr.write("aborted by the operator\n")
 
-        sys.exit(2)
+            sys.exit(2)
+    else:
+       checker.fetch()
 
 
 if __name__ == "__main__":
