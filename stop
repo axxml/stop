@@ -105,8 +105,8 @@ class Checker(object):
             val = "ERROR"
             diff = "N/A"
         else:
-            val = data['Close'][-1]
-            diff = data.diff()[-2:]['Close'][-1]
+            val = data['Close'].iloc[-1]
+            diff = data['Close'].diff().iloc[-2:].iloc[-1]
 
             if str(diff) == 'nan':
                 diff = "N/A"
