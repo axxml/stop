@@ -28,6 +28,7 @@ Supported configuration options:
 - plaintext mode
 - one-shot mode
 - decimal rounding
+- custom padding
 - custom URL opener
 
 See `stop -h` for more info.
@@ -40,7 +41,7 @@ type = custom/script
 exec = stop NVDA MSFT
 tail = true
 
-label = %output:-188%
+label = %output%
 
 click-left = kill -USR1 %pid%
 ```

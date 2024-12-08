@@ -24,6 +24,7 @@ __author__ = "Axel McLaren <scm@axml.uk>"
 
 _DEFAULT_DELAY = 5.0  # seconds
 _DEFAULT_ROUNDING = 2
+_DEFAULT_PADDING = 4
 _DEFAULT_COLOR = {
     'background': '#222222',
     'foreground': '#e7e7e7',
@@ -32,6 +33,8 @@ _DEFAULT_COLOR = {
     'loss': '#ff5555'
 }
 _DEFAULT_OPENER = "xdg-open"
+
+_BASE_WIDTH = 22  # 7-char ticker + 6.2-digit value + 3.2-digit diff
 
 _FORMAT_POLYBAR = "%{{A2:{} \"{}\":}}%{{B{}}}%{{F{}}}%{{u{}}}%{{+u}}%{{o{}}}%{{+o}} {} %{{-o}}%{{-u}}%{{F-}}%{{B-}}%{{B{}}} {} [%{{F{}}}{}%{{F-}}]%{{B-}}%{{A}}"
 _QUOTE_URL = "https\\://finance.yahoo.com/quote/"
@@ -48,8 +51,9 @@ class ConfigError(Exception):
 
 class Checker(object):
 
-    def __init__(self, tickers, rounding=_DEFAULT_ROUNDING):
+    def __init__(self, tickers, rounding=_DEFAULT_ROUNDING, padding=_DEFAULT_PADDING):
         self.rounding = rounding
+        self.padding = padding
         self.opener = _DEFAULT_OPENER
         self.colors = None
         self.current = None
@@ -68,6 +72,9 @@ class Checker(object):
     @property
     def rounded_diff(self):
         return '{{:+.{:d}f}}'.format(self.rounding)
+
+    def padded(self, s):
+        return _BASE_WIDTH + self.padding - sum(map(len, list(map(str, s))))
 
     def init(self, tickers):
         ticker_list = list(yfinance.Tickers(tickers).tickers.values())
@@ -146,7 +153,7 @@ class Checker(object):
                                             diff_color,
                                             formatted_diff)
 
-        sys.stdout.write("{}\n".format(output))
+        sys.stdout.write("{}{:<{padding}}\n".format(output, "", padding=self.padded((ticker, rounded, formatted_diff[1:]))))
         sys.stdout.flush()
 
     def run(self, delay=_DEFAULT_DELAY):
@@ -194,6 +201,9 @@ def main():
     parser.add_argument("-r", "--rounding", type=int, choices=range(0, 14),
                         default=_DEFAULT_ROUNDING,
                         help="decimal rounding")
+    parser.add_argument("-P", "--padding", type=int,
+                        default=_DEFAULT_PADDING,
+                        help="padding digit number")
     parser.add_argument("-s", "--one-shot", action='store_true',
                         help="run once and exit (first ticker only)")
     parser.add_argument("-v", "--version", action='version',
@@ -203,7 +213,7 @@ def main():
 
     args = parser.parse_args()
 
-    checker = Checker(args.ticker, args.rounding)
+    checker = Checker(args.ticker, args.rounding, args.padding)
 
     if not args.plain:
         checker.decorate(args.background, args.foreground, args.highlight, args.gain, args.loss)
