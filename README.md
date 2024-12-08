@@ -28,6 +28,7 @@ Supported configuration options:
 - plaintext mode
 - one-shot mode
 - decimal rounding
+- thousand separator
 - custom padding
 - custom URL opener
 

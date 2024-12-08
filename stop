@@ -34,7 +34,7 @@ _DEFAULT_COLOR = {
 }
 _DEFAULT_OPENER = "xdg-open"
 
-_BASE_WIDTH = 22  # 7-char ticker + 6.2-digit value + 3.2-digit diff
+_BASE_WIDTH = 24  # 7-char ticker + 6.2-digit value + 3.2-digit diff + 2 thousand separators
 
 _FORMAT_POLYBAR = "%{{A2:{} \"{}\":}}%{{B{}}}%{{F{}}}%{{u{}}}%{{+u}}%{{o{}}}%{{+o}} {} %{{-o}}%{{-u}}%{{F-}}%{{B-}}%{{B{}}} {} [%{{F{}}}{}%{{F-}}]%{{B-}}%{{A}}"
 _QUOTE_URL = "https\\://finance.yahoo.com/quote/"
@@ -51,9 +51,10 @@ class ConfigError(Exception):
 
 class Checker(object):
 
-    def __init__(self, tickers, rounding=_DEFAULT_ROUNDING, padding=_DEFAULT_PADDING):
+    def __init__(self, tickers, rounding=_DEFAULT_ROUNDING, padding=_DEFAULT_PADDING, thousand_separator=False):
         self.rounding = rounding
         self.padding = padding
+        self.k = ',' if thousand_separator else ''
         self.opener = _DEFAULT_OPENER
         self.colors = None
         self.current = None
@@ -67,11 +68,11 @@ class Checker(object):
 
     @property
     def rounded(self):
-        return '{{:.{:d}f}}'.format(self.rounding)
+        return '{{:{k}.{:d}f}}'.format(self.rounding, k=self.k)
 
     @property
     def rounded_diff(self):
-        return '{{:+.{:d}f}}'.format(self.rounding)
+        return '{{:+{k}.{:d}f}}'.format(self.rounding, k=self.k)
 
     def padded(self, s):
         return _BASE_WIDTH + self.padding - sum(map(len, list(map(str, s))))
@@ -193,17 +194,19 @@ def main():
     parser.add_argument("-lo", "--loss", type=str,
                         default=_DEFAULT_COLOR['loss'],
                         help="loss accent color")
+    parser.add_argument("-k", "--thousand-separator", action='store_true',
+                        help="use thousand separator")
     parser.add_argument("-o", "--opener", type=str,
                         default=_DEFAULT_OPENER,
                         help="quote URL opener")
     parser.add_argument("-p", "--plain", action='store_true',
                         help="disable polybar formatting")
-    parser.add_argument("-r", "--rounding", type=int, choices=range(0, 14),
-                        default=_DEFAULT_ROUNDING,
-                        help="decimal rounding")
     parser.add_argument("-P", "--padding", type=int,
                         default=_DEFAULT_PADDING,
                         help="padding digit number")
+    parser.add_argument("-r", "--rounding", type=int, choices=range(0, 14),
+                        default=_DEFAULT_ROUNDING,
+                        help="decimal rounding")
     parser.add_argument("-s", "--one-shot", action='store_true',
                         help="run once and exit (first ticker only)")
     parser.add_argument("-v", "--version", action='version',
@@ -213,7 +216,7 @@ def main():
 
     args = parser.parse_args()
 
-    checker = Checker(args.ticker, args.rounding, args.padding)
+    checker = Checker(args.ticker, args.rounding, args.padding, args.thousand_separator)
 
     if not args.plain:
         checker.decorate(args.background, args.foreground, args.highlight, args.gain, args.loss)
