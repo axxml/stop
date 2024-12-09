@@ -75,7 +75,9 @@ class Checker(object):
         return '{{:+{k}.{:d}f}}'.format(self.rounding, k=self.k)
 
     def padded(self, s):
-        return _BASE_WIDTH + self.padding - sum(map(len, list(map(str, s))))
+        padding = _BASE_WIDTH + self.padding - sum(map(len, list(map(str, s))))
+
+        return padding if padding > 0 else 0
 
     def init(self, tickers):
         ticker_list = list(yfinance.Tickers(tickers).tickers.values())
