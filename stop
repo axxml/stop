@@ -36,7 +36,50 @@ _DEFAULT_OPENER = "xdg-open"
 
 _BASE_WIDTH = 24  # 7-char ticker + 6.2-digit value + 3.2-digit diff + 2 thousand separators
 
-_FORMAT_POLYBAR = "%{{A2:{} \"{}\":}}%{{B{}}}%{{F{}}}%{{u{}}}%{{+u}}%{{o{}}}%{{+o}} {} %{{-o}}%{{-u}}%{{F-}}%{{B-}}%{{B{}}} {} [%{{F{}}}{}%{{F-}}]%{{B-}}%{{A}}"
+_FORMAT_PLAIN_VAL = " {}  {} "
+_FORMAT_POLYBAR_VAL = "%{{A2:{} \"{}\":}}%{{B{}}}%{{F{}}}%{{u{}}}%{{+u}}%{{o{}}}%{{+o}} {} %{{-o}}%{{-u}}%{{F-}}%{{B-}}%{{B{}}} {} "
+_ZOOM_LEVELS = (
+    # day
+    {
+        'level': 'day',
+        'history': ('5d', '1d'),
+        'shift': 1,
+        'format': {
+            'plain': _FORMAT_PLAIN_VAL + "[{}]",
+            'polybar': _FORMAT_POLYBAR_VAL + "[%{{F{}}}{}%{{F-}}]%{{B-}}%{{A}}",
+        },
+    },
+    # week
+    {
+        'level': 'week',
+        'history': ('1mo', '1d'),
+        'shift': 7,
+        'format': {
+            'plain': _FORMAT_PLAIN_VAL + "{{{}}}",
+            'polybar': _FORMAT_POLYBAR_VAL + "{{%{{F{}}}{}%{{F-}}}}%{{B-}}%{{A}}",
+        },
+    },
+    # month
+    {
+        'level': 'month',
+        'history': ('3mo', '1d'),
+        'shift': 30,
+        'format': {
+            'plain': _FORMAT_PLAIN_VAL + "({})",
+            'polybar': _FORMAT_POLYBAR_VAL + "(%{{F{}}}{}%{{F-}})%{{B-}}%{{A}}",
+        },
+    },
+    # year
+    {
+        'level': 'year',
+        'history': ('1y', '1d'),
+        'shift': 365,
+        'format': {
+            'plain': _FORMAT_PLAIN_VAL + "<{}>",
+            'polybar': _FORMAT_POLYBAR_VAL + "<%{{F{}}}{}%{{F-}}>%{{B-}}%{{A}}",
+        },
+    },
+)
 _QUOTE_URL = "https\\://finance.yahoo.com/quote/"
 
 
@@ -51,7 +94,7 @@ class ConfigError(Exception):
 
 class Checker(object):
 
-    def __init__(self, tickers, rounding=_DEFAULT_ROUNDING, padding=_DEFAULT_PADDING, thousand_separator=False):
+    def __init__(self, tickers, rounding=_DEFAULT_ROUNDING, padding=_DEFAULT_PADDING, thousand_separator=False, zoom_level=0):
         self.rounding = rounding
         self.padding = padding
         self.k = ',' if thousand_separator else ''
@@ -59,12 +102,16 @@ class Checker(object):
         self.colors = None
         self.current = None
         self.tickers = None
+        self.zoom_levels = None
+        self.zoom_current = None
         self.exit = None
 
-        self.init(tickers)
+        self.init(tickers, zoom_level)
 
         signal.signal(signal.SIGUSR1, self.cycle)
         signal.siginterrupt(signal.SIGUSR1, False)
+        signal.signal(signal.SIGUSR2, self.zoom)
+        signal.siginterrupt(signal.SIGUSR2, False)
 
     @property
     def rounded(self):
@@ -79,7 +126,7 @@ class Checker(object):
 
         return padding if padding > 0 else 0
 
-    def init(self, tickers):
+    def init(self, tickers, zoom_level):
         ticker_list = list(yfinance.Tickers(tickers).tickers.values())
 
         for ticker in ticker_list:
@@ -88,6 +135,14 @@ class Checker(object):
 
         self.tickers = cycle(ticker_list)
         self.exit = Event()
+
+        self.zoom_levels = cycle(_ZOOM_LEVELS)
+
+        while True:
+            self.zoom()
+
+            if self.zoom_current['level'] == zoom_level:
+                break
 
         self.cycle()
 
@@ -109,17 +164,23 @@ class Checker(object):
 
     def fetch(self):
         ticker = self.current.ticker
-        data = self.current.history(period="1mo", interval="1d")
+        data = self.current.history(period=self.zoom_current['history'][0],
+                                    interval=self.zoom_current['history'][1])
 
         if data.empty is True:
             val = "ERROR"
             diff = "N/A"
         else:
             val = data['Close'].iloc[-1]
-            diff = data['Close'].diff().iloc[-2:].iloc[-1]
+            diff = data['Close'].diff(periods=self.zoom_current['shift']).iloc[-2:].iloc[-1]
 
             if str(diff) == 'nan':
                 diff = "N/A"
+
+        if data.empty is True:
+            rounded = val
+        else:
+            rounded = self.rounded.format(val)
 
         if data.empty is True or isinstance(diff, str):
             formatted_diff = diff
@@ -127,34 +188,28 @@ class Checker(object):
             formatted_diff = self.rounded_diff.format(diff)
 
         if self.colors is None:
-            if data.empty is True:
-                output = " {}  {} [{}]".format(ticker, val, diff)
-            else:
-                output = " {}  {} [{}]".format(ticker,
-                                               self.rounded.format(val),
-                                               formatted_diff)
-        else:
-            if data.empty is True:
-                rounded = val
-            else:
-                rounded = self.rounded.format(val)
+            plain_tmpl = self.zoom_current['format']['plain']
 
+            output = plain_tmpl.format(ticker, rounded, formatted_diff)
+        else:
             if data.empty is True or isinstance(diff, str):
                 diff_color = self.colors.foreground if isinstance(diff, str) else self.colors.loss
             else:
                 diff_color = self.colors.gain if diff > 0 else self.colors.loss
 
-            output = _FORMAT_POLYBAR.format(self.opener,
-                                            _QUOTE_URL + ticker,
-                                            self.colors.highlight,
-                                            self.colors.foreground,
-                                            self.colors.background,
-                                            self.colors.background,
-                                            ticker,
-                                            self.colors.background,
-                                            rounded,
-                                            diff_color,
-                                            formatted_diff)
+            polybar_tmpl = self.zoom_current['format']['polybar']
+
+            output = polybar_tmpl.format(self.opener,
+                                         _QUOTE_URL + ticker,
+                                         self.colors.highlight,
+                                         self.colors.foreground,
+                                         self.colors.background,
+                                         self.colors.background,
+                                         ticker,
+                                         self.colors.background,
+                                         rounded,
+                                         diff_color,
+                                         formatted_diff)
 
         sys.stdout.write("{}{:<{padding}}\n".format(output, "", padding=self.padded((ticker, rounded, formatted_diff[1:]))))
         sys.stdout.flush()
@@ -169,6 +224,10 @@ class Checker(object):
 
     def cycle(self, *args):
         self.current = next(self.tickers)
+        self.exit.set()
+
+    def zoom(self, *args):
+        self.zoom_current = next(self.zoom_levels)
         self.exit.set()
 
 
@@ -213,12 +272,15 @@ def main():
                         help="run once and exit (first ticker only)")
     parser.add_argument("-v", "--version", action='version',
                         version='%(prog)s {0} by {1}'.format(__version__, __author__))
+    parser.add_argument("-z", "--zoom-level", type=str, choices=[l['level'] for l in _ZOOM_LEVELS],
+                        default=_ZOOM_LEVELS[0]['level'],
+                        help="decimal rounding")
     parser.add_argument("ticker", type=str, nargs='+',
                         help="ticker list")
 
     args = parser.parse_args()
 
-    checker = Checker(args.ticker, args.rounding, args.padding, args.thousand_separator)
+    checker = Checker(args.ticker, args.rounding, args.padding, args.thousand_separator, args.zoom_level)
 
     if not args.plain:
         checker.decorate(args.background, args.foreground, args.highlight, args.gain, args.loss)

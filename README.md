@@ -28,6 +28,11 @@ Supported configuration options:
 - plaintext mode
 - one-shot mode
 - decimal rounding
+- historical difference:
+    - daily: `[ .. ]`
+    - weekly: `{ .. }`
+    - monthly: `( .. )`
+    - yearly: `< .. >`
 - thousand separator
 - custom padding
 - custom URL opener
@@ -45,4 +50,5 @@ tail = true
 label = %output%
 
 click-left = kill -USR1 %pid%
+click-right = kill -USR2 %pid%
 ```
