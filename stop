@@ -172,7 +172,13 @@ class Checker(object):
             diff = "N/A"
         else:
             val = data['Close'].iloc[-1]
-            diff = data['Close'].diff(periods=self.zoom_current['shift']).iloc[-2:].iloc[-1]
+            periods = self.zoom_current['shift']
+
+            # subtract non-trading days
+            if self.zoom_current['level'] == 'year' and self.current.info['exchange'] != 'CCC':
+                periods -= 115
+
+            diff = data['Close'].diff(periods=periods).iloc[-2:].iloc[-1]
 
             if str(diff) == 'nan':
                 diff = "N/A"
