@@ -286,7 +286,7 @@ def main():
                         version='%(prog)s {0} by {1}'.format(__version__, __author__))
     parser.add_argument("-z", "--zoom-level", type=str, choices=[l['level'] for l in _ZOOM_LEVELS],
                         default=_ZOOM_LEVELS[0]['level'],
-                        help="decimal rounding")
+                        help="zoom level")
     parser.add_argument("ticker", type=str, nargs='+',
                         help="ticker list")
 
