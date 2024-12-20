@@ -92,6 +92,33 @@ class ConfigError(Exception):
         sys.exit(2)
 
 
+class Ticker(object):
+
+    def __init__(self, desc):
+        self._starting = False
+
+        try:
+            self.ticker, self.legend = desc.split(':')
+        except ValueError:
+            self.ticker = self.legend = desc
+
+        self.data = yfinance.Ticker(self.ticker)
+
+        if self.data.history().empty:
+            raise ConfigError("failed to load initial ticker history: {}".format(self.ticker))
+
+    @property
+    def starting(self):
+        return self._starting
+
+    @starting.setter
+    def starting(self, starting):
+        if not isinstance(starting, bool):
+            raise TypeError("Invalid starting value")
+
+        self._starting = starting
+
+
 class Checker(object):
 
     def __init__(self, tickers, starting_ticker, rounding=_DEFAULT_ROUNDING, padding=_DEFAULT_PADDING, thousand_separator=False, zoom_level=0):
@@ -127,11 +154,15 @@ class Checker(object):
         return padding if padding > 0 else 0
 
     def init(self, tickers, starting_ticker, zoom_level):
-        ticker_list = list(yfinance.Tickers(tickers).tickers.values())
+        ticker_list = []
 
-        for ticker in ticker_list:
-            if ticker.history().empty:
-                raise ConfigError("failed to load initial ticker history: {}".format(ticker.ticker))
+        for t in tickers:
+            ticker = Ticker(t)
+
+            if ticker.ticker == starting_ticker:
+                ticker.starting = True
+
+            ticker_list.append(ticker)
 
         self.tickers = cycle(ticker_list)
         self.zoom_levels = cycle(_ZOOM_LEVELS)
@@ -146,7 +177,7 @@ class Checker(object):
         while True:
             self.cycle()
 
-            if self.current.ticker == starting_ticker:
+            if self.current.starting:
                 break
 
     def decorate(self, bg, fg, hl, ga, lo):
@@ -167,31 +198,32 @@ class Checker(object):
 
     def fetch(self):
         ticker = self.current.ticker
-        data = self.current.history(period=self.zoom_current['history'][0],
-                                    interval=self.zoom_current['history'][1])
+        legend = self.current.legend
+        history = self.current.data.history(period=self.zoom_current['history'][0],
+                                            interval=self.zoom_current['history'][1])
 
-        if data.empty is True:
+        if history.empty is True:
             val = "ERROR"
             diff = "N/A"
         else:
-            val = data['Close'].iloc[-1]
+            val = history['Close'].iloc[-1]
             periods = self.zoom_current['shift']
 
             # subtract non-trading days
-            if self.zoom_current['level'] == 'year' and self.current.info['exchange'] != 'CCC':
+            if self.zoom_current['level'] == 'year' and self.current.data.info['exchange'] != 'CCC':
                 periods -= 115
 
-            diff = data['Close'].diff(periods=periods).iloc[-2:].iloc[-1]
+            diff = history['Close'].diff(periods=periods).iloc[-2:].iloc[-1]
 
             if str(diff) == 'nan':
                 diff = "N/A"
 
-        if data.empty is True:
+        if history.empty is True:
             rounded = val
         else:
             rounded = self.rounded.format(val)
 
-        if data.empty is True or isinstance(diff, str):
+        if history.empty is True or isinstance(diff, str):
             formatted_diff = diff
         else:
             formatted_diff = self.rounded_diff.format(diff)
@@ -199,9 +231,9 @@ class Checker(object):
         if self.colors is None:
             plain_tmpl = self.zoom_current['format']['plain']
 
-            output = plain_tmpl.format(ticker, rounded, formatted_diff)
+            output = plain_tmpl.format(legend, rounded, formatted_diff)
         else:
-            if data.empty is True or isinstance(diff, str):
+            if history.empty is True or isinstance(diff, str):
                 diff_color = self.colors.foreground if isinstance(diff, str) else self.colors.loss
             else:
                 diff_color = self.colors.gain if diff > 0 else self.colors.loss
@@ -214,13 +246,13 @@ class Checker(object):
                                          self.colors.foreground,
                                          self.colors.background,
                                          self.colors.background,
-                                         ticker,
+                                         legend,
                                          self.colors.background,
                                          rounded,
                                          diff_color,
                                          formatted_diff)
 
-        sys.stdout.write("{}{:<{padding}}\n".format(output, "", padding=self.padded((ticker, rounded, formatted_diff[1:]))))
+        sys.stdout.write("{}{:<{padding}}\n".format(output, "", padding=self.padded((legend, rounded, formatted_diff[1:]))))
         sys.stdout.flush()
 
     def run(self, delay=_DEFAULT_DELAY):
@@ -288,6 +320,7 @@ def main():
                         default=_ZOOM_LEVELS[0]['level'],
                         help="zoom level")
     parser.add_argument("ticker", type=str, nargs='+',
+                        metavar='TICKER[:LEGEND]',
                         help="ticker list")
 
     args = parser.parse_args()
