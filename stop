@@ -94,7 +94,7 @@ class ConfigError(Exception):
 
 class Checker(object):
 
-    def __init__(self, tickers, rounding=_DEFAULT_ROUNDING, padding=_DEFAULT_PADDING, thousand_separator=False, zoom_level=0):
+    def __init__(self, tickers, starting_ticker, rounding=_DEFAULT_ROUNDING, padding=_DEFAULT_PADDING, thousand_separator=False, zoom_level=0):
         self.rounding = rounding
         self.padding = padding
         self.k = ',' if thousand_separator else ''
@@ -106,7 +106,7 @@ class Checker(object):
         self.zoom_current = None
         self.exit = None
 
-        self.init(tickers, zoom_level)
+        self.init(tickers, starting_ticker, zoom_level)
 
         signal.signal(signal.SIGUSR1, self.cycle)
         signal.siginterrupt(signal.SIGUSR1, False)
@@ -126,7 +126,7 @@ class Checker(object):
 
         return padding if padding > 0 else 0
 
-    def init(self, tickers, zoom_level):
+    def init(self, tickers, starting_ticker, zoom_level):
         ticker_list = list(yfinance.Tickers(tickers).tickers.values())
 
         for ticker in ticker_list:
@@ -134,9 +134,8 @@ class Checker(object):
                 raise ConfigError("failed to load initial ticker history: {}".format(ticker.ticker))
 
         self.tickers = cycle(ticker_list)
-        self.exit = Event()
-
         self.zoom_levels = cycle(_ZOOM_LEVELS)
+        self.exit = Event()
 
         while True:
             self.zoom()
@@ -144,7 +143,11 @@ class Checker(object):
             if self.zoom_current['level'] == zoom_level:
                 break
 
-        self.cycle()
+        while True:
+            self.cycle()
+
+            if self.current.ticker == starting_ticker:
+                break
 
     def decorate(self, bg, fg, hl, ga, lo):
         colors = {
@@ -276,6 +279,9 @@ def main():
                         help="decimal rounding")
     parser.add_argument("-s", "--one-shot", action='store_true',
                         help="run once and exit (first ticker only)")
+    parser.add_argument("-t", "--starting-ticker", type=str,
+                        default='',
+                        help="starting ticker")
     parser.add_argument("-v", "--version", action='version',
                         version='%(prog)s {0} by {1}'.format(__version__, __author__))
     parser.add_argument("-z", "--zoom-level", type=str, choices=[l['level'] for l in _ZOOM_LEVELS],
@@ -286,7 +292,13 @@ def main():
 
     args = parser.parse_args()
 
-    checker = Checker(args.ticker, args.rounding, args.padding, args.thousand_separator, args.zoom_level)
+    if not args.starting_ticker:
+        args.starting_ticker = args.ticker[0]
+
+    if args.starting_ticker not in args.ticker:
+        raise ConfigError("{} ticker not found in the passed ticker list".format(args.starting_ticker))
+
+    checker = Checker(args.ticker, args.starting_ticker, args.rounding, args.padding, args.thousand_separator, args.zoom_level)
 
     if not args.plain:
         checker.decorate(args.background, args.foreground, args.highlight, args.gain, args.loss)
