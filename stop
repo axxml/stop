@@ -121,7 +121,8 @@ class Ticker(object):
 
 class Checker(object):
 
-    def __init__(self, tickers, starting_ticker, rounding=_DEFAULT_ROUNDING, padding=_DEFAULT_PADDING, thousand_separator=False, zoom_level=0):
+    def __init__(self, tickers, starting_ticker, percent, rounding=_DEFAULT_ROUNDING, padding=_DEFAULT_PADDING, thousand_separator=False, zoom_level=0):
+        self.percent = percent
         self.rounding = rounding
         self.padding = padding
         self.k = ',' if thousand_separator else ''
@@ -213,10 +214,12 @@ class Checker(object):
             if self.zoom_current['level'] == 'year' and self.current.data.info['exchange'] != 'CCC':
                 periods -= 115
 
-            diff = history['Close'].diff(periods=periods).iloc[-2:].iloc[-1]
+            diff = getattr(history['Close'], 'pct_change' if self.percent else 'diff')(periods=periods).iloc[-2:].iloc[-1]
 
             if str(diff) == 'nan':
                 diff = "N/A"
+            elif self.percent:
+                diff *= 100
 
         if history.empty is True:
             rounded = val
@@ -227,6 +230,9 @@ class Checker(object):
             formatted_diff = diff
         else:
             formatted_diff = self.rounded_diff.format(diff)
+
+        if self.percent:
+            formatted_diff += '%'
 
         if self.colors is None:
             plain_tmpl = self.zoom_current['format']['plain']
@@ -278,6 +284,8 @@ def main():
 
     parser = argparse.ArgumentParser(description='Stock position tracker for status bars')
 
+    parser.add_argument("-c", "--percent", action='store_true',
+                        help="percent change display")
     parser.add_argument("-d", "--delay", type=float,
                         default=_DEFAULT_DELAY,
                         help="delay between checks")
@@ -331,7 +339,7 @@ def main():
     if args.starting_ticker not in args.ticker:
         raise ConfigError("{} ticker not found in the passed ticker list".format(args.starting_ticker))
 
-    checker = Checker(args.ticker, args.starting_ticker, args.rounding, args.padding, args.thousand_separator, args.zoom_level)
+    checker = Checker(args.ticker, args.starting_ticker, args.percent, args.rounding, args.padding, args.thousand_separator, args.zoom_level)
 
     if not args.plain:
         checker.decorate(args.background, args.foreground, args.highlight, args.gain, args.loss)

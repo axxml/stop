@@ -19,6 +19,7 @@ Stock position tracker for status bars
 Supported configuration options:
 
 - custom ticker display value (legend)
+- percent change display
 - delay between checks
 - colors:
     - background
