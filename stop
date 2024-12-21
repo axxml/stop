@@ -36,7 +36,7 @@ _DEFAULT_OPENER = "xdg-open"
 
 _BASE_WIDTH = 24  # 7-char ticker + 6.2-digit value + 3.2-digit diff + 2 thousand separators
 
-_FORMAT_PLAIN_VAL = " {}  {} "
+_FORMAT_PLAIN_VAL = "{} {} "
 _FORMAT_POLYBAR_VAL = "%{{A2:{} \"{}\":}}%{{B{}}}%{{F{}}}%{{u{}}}%{{+u}}%{{o{}}}%{{+o}} {} %{{-o}}%{{-u}}%{{F-}}%{{B-}}%{{B{}}} {} "
 _ZOOM_LEVELS = (
     # day
