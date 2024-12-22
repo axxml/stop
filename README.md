@@ -21,6 +21,7 @@ Supported configuration options:
 - custom ticker display value (legend)
 - percent change display
 - delay between checks
+- automatic ticker rotation
 - colors:
     - background
     - foreground

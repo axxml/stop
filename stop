@@ -133,6 +133,7 @@ class Checker(object):
         self.zoom_levels = None
         self.zoom_current = None
         self.exit = None
+        self.skip = False
 
         self.init(tickers, starting_ticker, zoom_level)
 
@@ -269,7 +270,7 @@ class Checker(object):
         sys.stdout.write("{}{:<{padding}}\n".format(output, "", padding=self.padded((legend, rounded, formatted_diff[1:]))))
         sys.stdout.flush()
 
-    def run(self, delay=_DEFAULT_DELAY):
+    def run(self, delay=_DEFAULT_DELAY, rotate=False):
         while True:
             self.exit.clear()
 
@@ -277,11 +278,18 @@ class Checker(object):
                 self.fetch()
                 self.exit.wait(delay)
 
+                if rotate and not self.skip:
+                    self.cycle()
+
+                self.skip = False
+
     def cycle(self, *args):
+        self.skip = bool(len(args))
         self.current = next(self.tickers)
         self.exit.set()
 
     def zoom(self, *args):
+        self.skip = bool(len(args))
         self.zoom_current = next(self.zoom_levels)
         self.exit.set()
 
@@ -325,6 +333,8 @@ def main():
     parser.add_argument("-r", "--rounding", type=int, choices=range(0, 14),
                         default=_DEFAULT_ROUNDING,
                         help="decimal rounding")
+    parser.add_argument("-R", "--rotate", action='store_true',
+                        help="automatically rotate over tickers")
     parser.add_argument("-s", "--one-shot", action='store_true',
                         help="run once and exit (first ticker only)")
     parser.add_argument("-t", "--starting-ticker", type=str,
@@ -355,7 +365,7 @@ def main():
 
     if not args.one_shot:
         try:
-            checker.run(args.delay)
+            checker.run(args.delay, args.rotate)
         except KeyboardInterrupt:
             sys.stderr.write("aborted by the operator\n")
 
