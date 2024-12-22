@@ -156,15 +156,19 @@ class Checker(object):
         return padding if padding > 0 else 0
 
     def init(self, tickers, starting_ticker, zoom_level):
+        ticker_zero = Ticker(starting_ticker)
         ticker_list = []
 
         for t in tickers:
             ticker = Ticker(t)
 
-            if ticker.ticker == starting_ticker:
+            if ticker.ticker == ticker_zero.ticker:
                 ticker.starting = True
 
             ticker_list.append(ticker)
+
+        if not any(t.starting for t in ticker_list):
+            raise ConfigError("{} ticker not found in the passed ticker list".format(ticker_zero.ticker))
 
         self.tickers = cycle(ticker_list)
         self.zoom_levels = cycle(_ZOOM_LEVELS)
@@ -353,9 +357,6 @@ def main():
 
     if not args.starting_ticker:
         args.starting_ticker = args.ticker[0]
-
-    if args.starting_ticker not in args.ticker:
-        raise ConfigError("{} ticker not found in the passed ticker list".format(args.starting_ticker))
 
     checker = Checker(args.ticker, args.starting_ticker, args.percent, args.rounding, args.padding, args.thousand_separator, args.zoom_level)
 
