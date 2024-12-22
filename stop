@@ -200,8 +200,13 @@ class Checker(object):
     def fetch(self):
         ticker = self.current.ticker
         legend = self.current.legend
-        history = self.current.data.history(period=self.zoom_current['history'][0],
-                                            interval=self.zoom_current['history'][1])
+        period, interval = self.zoom_current['history']
+
+        # account for volatility
+        if self.zoom_current['level'] == 'day' and self.current.data.info['exchange'] == 'CCC':
+            interval = "5m"
+
+        history = self.current.data.history(period=period, interval=interval)
 
         if history.empty is True:
             val = "ERROR"
@@ -213,6 +218,9 @@ class Checker(object):
             # subtract non-trading days
             if self.zoom_current['level'] == 'year' and self.current.data.info['exchange'] != 'CCC':
                 periods -= 115
+            # look back 24h
+            elif self.zoom_current['level'] == 'day' and self.current.data.info['exchange'] == 'CCC':
+                periods = 288
 
             diff = getattr(history['Close'], 'pct_change' if self.percent else 'diff')(periods=periods).iloc[-2:].iloc[-1]
 
