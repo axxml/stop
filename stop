@@ -254,7 +254,7 @@ class Checker(object):
         else:
             formatted_diff = self.rounded_diff.format(diff)
 
-        if self.percent:
+        if self.percent and not isinstance(diff, str):
             formatted_diff += '%'
 
         if self.colors is None:
