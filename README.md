@@ -32,10 +32,11 @@ Supported configuration options:
 - one-shot mode
 - decimal rounding
 - historical difference:
-    - daily: `[ .. ]`
-    - weekly: `{ .. }`
-    - monthly: `( .. )`
-    - yearly: `< .. >`
+    - day: `[ .. ]`
+    - week: `{ .. }`
+    - month: `( .. )`
+    - year: `< .. >`
+    - 5 years: `| .. |`
 - thousand separator
 - custom padding
 - custom URL opener

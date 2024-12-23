@@ -79,6 +79,16 @@ _ZOOM_LEVELS = (
             'polybar': _FORMAT_POLYBAR_VAL + "<%{{F{}}}{}%{{F-}}>%{{B-}}%{{A}}",
         },
     },
+    # 5 years
+    {
+        'level': '5-years',
+        'history': ('5y', '3mo'),
+        'shift': 20,
+        'format': {
+            'plain': _FORMAT_PLAIN_VAL + "|{}|",
+            'polybar': _FORMAT_POLYBAR_VAL + "|%{{F{}}}{}%{{F-}}|%{{B-}}%{{A}}",
+        },
+    },
 )
 _QUOTE_URL = "https\\://finance.yahoo.com/quote/"
 
