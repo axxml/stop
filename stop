@@ -102,6 +102,22 @@ class ConfigError(Exception):
         sys.exit(2)
 
 
+class Config(object):
+
+    def __init__(self, d):
+        for k, v in d.items():
+            if isinstance(v, dict):
+                v = Config(v)
+
+            setattr(self, k, v)
+
+    def __setattr__(self, k, v):
+        if not hasattr(self, k):
+            super().__setattr__(k, v)
+        else:
+            raise RuntimeError("Can't modify read-only config setting: {}".format(k))
+
+
 class Ticker(object):
 
     def __init__(self, desc):
@@ -181,13 +197,13 @@ class Checker(object):
             raise ConfigError("{} ticker not found in the passed ticker list".format(ticker_zero.ticker))
 
         self.tickers = cycle(ticker_list)
-        self.zoom_levels = cycle(_ZOOM_LEVELS)
+        self.zoom_levels = cycle(Config(z) for z in _ZOOM_LEVELS)
         self.exit = Event()
 
         while True:
             self.zoom()
 
-            if self.zoom_current['level'] == zoom_level:
+            if self.zoom_current.level == zoom_level:
                 break
 
         while True:
@@ -208,17 +224,15 @@ class Checker(object):
         # normalize color codes
         colors.update((k, v if v[0] == '#' else '#' + v) for k, v in colors.items())
 
-        Colors = type('Colors', (object,), colors)
-
-        self.colors = Colors()
+        self.colors = Config(colors)
 
     def fetch(self):
         ticker = self.current.ticker
         legend = self.current.legend
-        period, interval = self.zoom_current['history']
+        period, interval = self.zoom_current.history
 
         # account for volatility
-        if self.zoom_current['level'] == 'day' and self.current.data.info['exchange'] == 'CCC':
+        if self.zoom_current.level == 'day' and self.current.data.info['exchange'] == 'CCC':
             interval = "5m"
 
         history = self.current.data.history(period=period, interval=interval)
@@ -228,13 +242,13 @@ class Checker(object):
             diff = "N/A"
         else:
             val = history['Close'].iloc[-1]
-            periods = self.zoom_current['shift']
+            periods = self.zoom_current.shift
 
             # subtract non-trading days
-            if self.zoom_current['level'] == 'year' and self.current.data.info['exchange'] != 'CCC':
+            if self.zoom_current.level == 'year' and self.current.data.info['exchange'] != 'CCC':
                 periods -= 115
             # look back 24h
-            elif self.zoom_current['level'] == 'day' and self.current.data.info['exchange'] == 'CCC':
+            elif self.zoom_current.level == 'day' and self.current.data.info['exchange'] == 'CCC':
                 periods = 288
 
             diff = getattr(history['Close'], 'pct_change' if self.percent else 'diff')(periods=periods).iloc[-2:].iloc[-1]
@@ -258,7 +272,7 @@ class Checker(object):
             formatted_diff += '%'
 
         if self.colors is None:
-            plain_tmpl = self.zoom_current['format']['plain']
+            plain_tmpl = self.zoom_current.format.plain
 
             output = plain_tmpl.format(legend, rounded, formatted_diff)
         else:
@@ -267,7 +281,7 @@ class Checker(object):
             else:
                 diff_color = self.colors.gain if diff > 0 else self.colors.loss
 
-            polybar_tmpl = self.zoom_current['format']['polybar']
+            polybar_tmpl = self.zoom_current.format.polybar
 
             output = polybar_tmpl.format(self.opener,
                                          _QUOTE_URL + ticker,
