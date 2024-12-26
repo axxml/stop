@@ -227,75 +227,81 @@ class Checker(object):
         self.colors = Config(colors)
 
     def fetch(self):
-        ticker = self.current.ticker
-        legend = self.current.legend
         period, interval = self.zoom_current.history
+        exchange = self.current.data.info['exchange']
 
         # account for volatility
-        if self.zoom_current.level == 'day' and self.current.data.info['exchange'] == 'CCC':
+        if self.zoom_current.level == 'day' and exchange == 'CCC':
             interval = "5m"
 
         history = self.current.data.history(period=period, interval=interval)
 
         if history.empty is True:
-            val = "ERROR"
-            diff = "N/A"
+            raise ValueError("Historical data not found")
         else:
             val = history['Close'].iloc[-1]
             periods = self.zoom_current.shift
 
             # subtract non-trading days
-            if self.zoom_current.level == 'year' and self.current.data.info['exchange'] != 'CCC':
+            if self.zoom_current.level == 'year' and exchange != 'CCC':
                 periods -= 115
             # look back 24h
-            elif self.zoom_current.level == 'day' and self.current.data.info['exchange'] == 'CCC':
+            elif self.zoom_current.level == 'day' and exchange == 'CCC':
                 periods = 288
 
             diff = getattr(history['Close'], 'pct_change' if self.percent else 'diff')(periods=periods).iloc[-2:].iloc[-1]
 
             if str(diff) == 'nan':
-                diff = "N/A"
+                raise ValueError("Diff data not available")
             elif self.percent:
                 diff *= 100
 
-        if history.empty is True:
+            return val, diff
+
+    def display(self):
+        try:
+            val, diff = self.fetch()
+        except Exception:
+            val, diff = "ERROR", "N/A"
+
+        if isinstance(val, str):
             rounded = val
         else:
             rounded = self.rounded.format(val)
 
-        if history.empty is True or isinstance(diff, str):
+        if isinstance(diff, str):
             formatted_diff = diff
         else:
             formatted_diff = self.rounded_diff.format(diff)
 
-        if self.percent and not isinstance(diff, str):
-            formatted_diff += '%'
+            if self.percent:
+                formatted_diff += '%'
 
         if self.colors is None:
             plain_tmpl = self.zoom_current.format.plain
 
-            output = plain_tmpl.format(legend, rounded, formatted_diff)
+            output = plain_tmpl.format(self.current.legend, rounded, formatted_diff)
         else:
-            if history.empty is True or isinstance(diff, str):
-                diff_color = self.colors.foreground if isinstance(diff, str) else self.colors.loss
+            if isinstance(diff, str):
+                diff_color = self.colors.foreground
             else:
                 diff_color = self.colors.gain if diff > 0 else self.colors.loss
 
             polybar_tmpl = self.zoom_current.format.polybar
 
             output = polybar_tmpl.format(self.opener,
-                                         _QUOTE_URL + ticker,
+                                         _QUOTE_URL + self.current.ticker,
                                          self.colors.highlight,
                                          self.colors.foreground,
                                          self.colors.background,
                                          self.colors.background,
-                                         legend,
+                                         self.current.legend,
                                          self.colors.background,
                                          rounded,
                                          diff_color,
                                          formatted_diff)
 
-        sys.stdout.write("{}{:<{padding}}\n".format(output, "", padding=self.padded((legend, rounded, formatted_diff[1:]))))
+        sys.stdout.write("{}{:<{padding}}\n".format(output, "", padding=self.padded((self.current.legend, rounded, formatted_diff[1:]))))
         sys.stdout.flush()
 
     def run(self, delay=_DEFAULT_DELAY, rotate=False):
@@ -303,7 +309,7 @@ class Checker(object):
             self.exit.clear()
 
             while not self.exit.is_set():
-                self.fetch()
+                self.display()
                 self.exit.wait(delay)
 
                 if rotate and not self.skip:
