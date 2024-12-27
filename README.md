@@ -37,6 +37,7 @@ Supported configuration options:
     - month: `( .. )`
     - year: `< .. >`
     - 5 years: `| .. |`
+    - share price: `> .. <`
 - thousand separator
 - custom padding
 - custom URL opener

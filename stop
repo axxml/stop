@@ -89,8 +89,21 @@ _ZOOM_LEVELS = (
             'polybar': _FORMAT_POLYBAR_VAL + "|%{{F{}}}{}%{{F-}}|%{{B-}}%{{A}}",
         },
     },
+    # price
+    {
+        'level': 'price',
+        'history': ('5d', '5m'),
+        'shift': 1,
+        'format': {
+            'plain': _FORMAT_PLAIN_VAL + ">{}<",
+            'polybar': _FORMAT_POLYBAR_VAL + ">%{{F{}}}{}%{{F-}}<%{{B-}}%{{A}}",
+        },
+    },
 )
 _QUOTE_URL = "https\\://finance.yahoo.com/quote/"
+
+_VAL_ERROR = "ERROR"
+_DIFF_NA = "N/A"
 
 
 class ConfigError(Exception):
@@ -123,15 +136,46 @@ class Ticker(object):
     def __init__(self, desc):
         self._starting = False
 
-        try:
-            self.ticker, self.legend = desc.split(':')
-        except ValueError:
-            self.ticker = self.legend = desc
-
+        self.ticker, self.legend, self.price, self.shares = self.parse(desc)
         self.data = yfinance.Ticker(self.ticker)
 
         if self.data.history().empty:
             raise ConfigError("failed to load initial ticker history: {}".format(self.ticker))
+
+    def parse(self, desc):
+        ti = desc.split(':', 3)
+
+        ticker = ti[0]
+
+        if len(ti) == 1:
+            legend = ticker
+            price = shares = 0
+        elif len(ti) == 2:
+            try:
+                legend, price = ticker, float(ti[1])
+            except ValueError:
+                legend, price = ti[1], 0
+
+            shares = 0
+        elif len(ti) == 3:
+            try:
+                legend, price, shares = ticker, float(ti[1]), ti[2]
+            except ValueError:
+                legend, price, shares = ti[1], ti[2], 0
+        elif len(ti) == 4:
+            ticker, legend, price, shares = ti
+
+        try:
+            price = float(price)
+        except ValueError:
+            price = 0
+
+        try:
+            shares = float(shares)
+        except ValueError:
+            shares = 0
+
+        return ticker, legend, price, shares
 
     @property
     def starting(self):
@@ -240,21 +284,33 @@ class Checker(object):
             raise ValueError("Historical data not found")
         else:
             val = history['Close'].iloc[-1]
-            periods = self.zoom_current.shift
 
-            # subtract non-trading days
-            if self.zoom_current.level == 'year' and exchange != 'CCC':
-                periods -= 115
-            # look back 24h
-            elif self.zoom_current.level == 'day' and exchange == 'CCC':
-                periods = 288
+            if self.zoom_current.level == 'price':
+                if self.current.price > 0:
+                    diff = val - self.current.price
 
-            diff = getattr(history['Close'], 'pct_change' if self.percent else 'diff')(periods=periods).iloc[-2:].iloc[-1]
+                    if self.percent:
+                        diff = diff / self.current.price * 100
+                    elif self.current.shares > 0:
+                        diff *= self.current.shares
+                else:
+                    diff = _DIFF_NA
+            else:
+                periods = self.zoom_current.shift
 
-            if str(diff) == 'nan':
-                raise ValueError("Diff data not available")
-            elif self.percent:
-                diff *= 100
+                # subtract non-trading days
+                if self.zoom_current.level == 'year' and exchange != 'CCC':
+                    periods -= 115
+                # look back 24h
+                elif self.zoom_current.level == 'day' and exchange == 'CCC':
+                    periods = 288
+
+                diff = getattr(history['Close'], 'pct_change' if self.percent else 'diff')(periods=periods).iloc[-2:].iloc[-1]
+
+                if str(diff) == 'nan':
+                    diff = _DIFF_NA
+                elif self.percent:
+                    diff *= 100
 
             return val, diff
 
@@ -262,7 +318,7 @@ class Checker(object):
         try:
             val, diff = self.fetch()
         except Exception:
-            val, diff = "ERROR", "N/A"
+            val, diff = _VAL_ERROR, _DIFF_NA
 
         if isinstance(val, str):
             rounded = val
@@ -380,7 +436,7 @@ def main():
                         default=_ZOOM_LEVELS[0]['level'],
                         help="starting zoom level")
     parser.add_argument("ticker", type=str, nargs='+',
-                        metavar='TICKER[:LEGEND]',
+                        metavar='TICKER[:LEGEND][:PRICE-PER-SHARE[:SHARES]]',
                         help="ticker list")
 
     args = parser.parse_args()
