@@ -92,7 +92,7 @@ _ZOOM_LEVELS = (
     # price
     {
         'level': 'price',
-        'history': ('5d', '5m'),
+        'history': ('5d', '1d'),
         'shift': 1,
         'format': {
             'plain': _FORMAT_PLAIN_VAL + ">{}<",
@@ -282,37 +282,37 @@ class Checker(object):
 
         if history.empty is True:
             raise ValueError("Historical data not found")
-        else:
-            val = history['Close'].iloc[-1]
 
-            if self.zoom_current.level == 'price':
-                if self.current.price > 0:
-                    diff = val - self.current.price
+        val = history['Close'].iloc[-1]
 
-                    if self.percent:
-                        diff = diff / self.current.price * 100
-                    elif self.current.shares > 0:
-                        diff *= self.current.shares
-                else:
-                    diff = _DIFF_NA
+        if self.zoom_current.level == 'price':
+            if self.current.price > 0:
+                diff = val - self.current.price
+
+                if self.percent:
+                    diff = diff / self.current.price * 100
+                elif self.current.shares > 0:
+                    diff *= self.current.shares
             else:
-                periods = self.zoom_current.shift
+                diff = _DIFF_NA
+        else:
+            periods = self.zoom_current.shift
 
-                # subtract non-trading days
-                if self.zoom_current.level == 'year' and exchange != 'CCC':
-                    periods -= 115
-                # look back 24h
-                elif self.zoom_current.level == 'day' and exchange == 'CCC':
-                    periods = 288
+            # subtract non-trading days
+            if self.zoom_current.level == 'year' and exchange != 'CCC':
+                periods -= 115
+            # look back 24h
+            elif self.zoom_current.level == 'day' and exchange == 'CCC':
+                periods = 288
 
-                diff = getattr(history['Close'], 'pct_change' if self.percent else 'diff')(periods=periods).iloc[-2:].iloc[-1]
+            diff = getattr(history['Close'], 'pct_change' if self.percent else 'diff')(periods=periods).iloc[-2:].iloc[-1]
 
-                if str(diff) == 'nan':
-                    diff = _DIFF_NA
-                elif self.percent:
-                    diff *= 100
+            if str(diff) == 'nan':
+                diff = _DIFF_NA
+            elif self.percent:
+                diff *= 100
 
-            return val, diff
+        return val, diff
 
     def display(self):
         try:
@@ -334,28 +334,24 @@ class Checker(object):
                 formatted_diff += '%'
 
         if self.colors is None:
-            plain_tmpl = self.zoom_current.format.plain
-
-            output = plain_tmpl.format(self.current.legend, rounded, formatted_diff)
+            output = self.zoom_current.format.plain.format(self.current.legend, rounded, formatted_diff)
         else:
             if isinstance(diff, str):
                 diff_color = self.colors.foreground
             else:
                 diff_color = self.colors.gain if diff > 0 else self.colors.loss
 
-            polybar_tmpl = self.zoom_current.format.polybar
-
-            output = polybar_tmpl.format(self.opener,
-                                         _QUOTE_URL + self.current.ticker,
-                                         self.colors.highlight,
-                                         self.colors.foreground,
-                                         self.colors.background,
-                                         self.colors.background,
-                                         self.current.legend,
-                                         self.colors.background,
-                                         rounded,
-                                         diff_color,
-                                         formatted_diff)
+            output = self.zoom_current.format.polybar.format(self.opener,
+                                                             _QUOTE_URL + self.current.ticker,
+                                                             self.colors.highlight,
+                                                             self.colors.foreground,
+                                                             self.colors.background,
+                                                             self.colors.background,
+                                                             self.current.legend,
+                                                             self.colors.background,
+                                                             rounded,
+                                                             diff_color,
+                                                             formatted_diff)
 
         sys.stdout.write("{}{:<{padding}}\n".format(output, "", padding=self.padded((self.current.legend, rounded, formatted_diff[1:]))))
         sys.stdout.flush()
@@ -458,7 +454,7 @@ def main():
 
             sys.exit(2)
     else:
-       checker.fetch()
+       checker.display()
 
 
 if __name__ == "__main__":
