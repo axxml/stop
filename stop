@@ -7,7 +7,8 @@ import signal
 import sys
 
 from itertools import cycle
-from threading import Event
+from queue import Empty, Queue
+from threading import Event, Lock, Thread
 
 try:
     import yfinance
@@ -33,11 +34,13 @@ _DEFAULT_COLOR = {
     'loss': '#ff5555'
 }
 _DEFAULT_OPENER = "xdg-open"
+_DEFAULT_THREADS = 8
 
 _BASE_WIDTH = 24  # 7-char ticker + 6.2-digit value + 3.2-digit diff + 2 thousand separators
 
 _FORMAT_PLAIN_VAL = "{} {} "
-_FORMAT_POLYBAR_VAL = "%{{A2:{} \"{}\":}}%{{B{}}}%{{F{}}}%{{u{}}}%{{+u}}%{{o{}}}%{{+o}} {} %{{-o}}%{{-u}}%{{F-}}%{{B-}}%{{B{}}} {} "
+_FORMAT_POLYBAR_VAL = "%{{B{}}}%{{F{}}}%{{u{}}}%{{+u}}%{{o{}}}%{{+o}} {} %{{-o}}%{{-u}}%{{F-}}%{{B-}}%{{B{}}} {} "
+_FORMAT_POLYBAR_URL_VAL = "%{{A2:{} \"{}\":}}%{{B{}}}%{{F{}}}%{{u{}}}%{{+u}}%{{o{}}}%{{+o}} {} %{{-o}}%{{-u}}%{{F-}}%{{B-}}%{{B{}}} {} "
 _ZOOM_LEVELS = (
     # day
     {
@@ -46,7 +49,8 @@ _ZOOM_LEVELS = (
         'shift': 1,
         'format': {
             'plain': _FORMAT_PLAIN_VAL + "[{}]",
-            'polybar': _FORMAT_POLYBAR_VAL + "[%{{F{}}}{}%{{F-}}]%{{B-}}%{{A}}",
+            'polybar': _FORMAT_POLYBAR_VAL + "[%{{F{}}}{}%{{F-}}]%{{B-}}",
+            'polybar_url': _FORMAT_POLYBAR_URL_VAL + "[%{{F{}}}{}%{{F-}}]%{{B-}}%{{A}}",
         },
     },
     # week
@@ -56,7 +60,8 @@ _ZOOM_LEVELS = (
         'shift': 7,
         'format': {
             'plain': _FORMAT_PLAIN_VAL + "{{{}}}",
-            'polybar': _FORMAT_POLYBAR_VAL + "{{%{{F{}}}{}%{{F-}}}}%{{B-}}%{{A}}",
+            'polybar': _FORMAT_POLYBAR_VAL + "{{%{{F{}}}{}%{{F-}}}}%{{B-}}",
+            'polybar_url': _FORMAT_POLYBAR_URL_VAL + "{{%{{F{}}}{}%{{F-}}}}%{{B-}}%{{A}}",
         },
     },
     # month
@@ -66,7 +71,8 @@ _ZOOM_LEVELS = (
         'shift': 30,
         'format': {
             'plain': _FORMAT_PLAIN_VAL + "({})",
-            'polybar': _FORMAT_POLYBAR_VAL + "(%{{F{}}}{}%{{F-}})%{{B-}}%{{A}}",
+            'polybar': _FORMAT_POLYBAR_VAL + "(%{{F{}}}{}%{{F-}})%{{B-}}",
+            'polybar_url': _FORMAT_POLYBAR_URL_VAL + "(%{{F{}}}{}%{{F-}})%{{B-}}%{{A}}",
         },
     },
     # year
@@ -76,7 +82,8 @@ _ZOOM_LEVELS = (
         'shift': 365,
         'format': {
             'plain': _FORMAT_PLAIN_VAL + "<{}>",
-            'polybar': _FORMAT_POLYBAR_VAL + "<%{{F{}}}{}%{{F-}}>%{{B-}}%{{A}}",
+            'polybar': _FORMAT_POLYBAR_VAL + "<%{{F{}}}{}%{{F-}}>%{{B-}}",
+            'polybar_url': _FORMAT_POLYBAR_URL_VAL + "<%{{F{}}}{}%{{F-}}>%{{B-}}%{{A}}",
         },
     },
     # 5 years
@@ -86,7 +93,8 @@ _ZOOM_LEVELS = (
         'shift': 20,
         'format': {
             'plain': _FORMAT_PLAIN_VAL + "|{}|",
-            'polybar': _FORMAT_POLYBAR_VAL + "|%{{F{}}}{}%{{F-}}|%{{B-}}%{{A}}",
+            'polybar': _FORMAT_POLYBAR_VAL + "|%{{F{}}}{}%{{F-}}|%{{B-}}",
+            'polybar_url': _FORMAT_POLYBAR_URL_VAL + "|%{{F{}}}{}%{{F-}}|%{{B-}}%{{A}}",
         },
     },
     # price
@@ -96,11 +104,11 @@ _ZOOM_LEVELS = (
         'shift': 1,
         'format': {
             'plain': _FORMAT_PLAIN_VAL + ">{}<",
-            'polybar': _FORMAT_POLYBAR_VAL + ">%{{F{}}}{}%{{F-}}<%{{B-}}%{{A}}",
+            'polybar': _FORMAT_POLYBAR_VAL + ">%{{F{}}}{}%{{F-}}<%{{B-}}",
+            'polybar_url': _FORMAT_POLYBAR_URL_VAL + ">%{{F{}}}{}%{{F-}}<%{{B-}}%{{A}}",
         },
     },
 )
-_QUOTE_URL = "https\\://finance.yahoo.com/quote/"
 
 _VAL_ERROR = "ERROR"
 _DIFF_NA = "N/A"
@@ -133,16 +141,18 @@ class Config(object):
 
 class Ticker(object):
 
-    def __init__(self, desc):
-        self._starting = False
+    def __new__(cls, desc, *args, **kwargs):
+        info = cls.parse(desc)
 
-        self.ticker, self.legend, self.price, self.shares = self.parse(desc)
-        self.data = yfinance.Ticker(self.ticker)
+        if info[0] == 'TOTAL':
+            ticker_cls = TickerTotal
+        else:
+            ticker_cls = TickerYahoo
 
-        if self.data.history().empty:
-            raise ConfigError("failed to load initial ticker history: {}".format(self.ticker))
+        return ticker_cls(info, *args, **kwargs)
 
-    def parse(self, desc):
+    @staticmethod
+    def parse(desc):
         ti = desc.split(':', 3)
 
         ticker = ti[0]
@@ -177,6 +187,21 @@ class Ticker(object):
 
         return ticker, legend, price, shares
 
+
+class TickerGeneric(object):
+
+    quote_url = None
+
+    lock = Lock()
+    _zoom = Config(_ZOOM_LEVELS[0])
+
+    def __init__(self, info):
+        self._starting = False
+
+        self.ticker, self.legend, self.price, self.shares = info
+        self.val = None
+        self.diff = None
+
     @property
     def starting(self):
         return self._starting
@@ -188,20 +213,154 @@ class Ticker(object):
 
         self._starting = starting
 
+    @property
+    def zoom(self):
+        return type(self)._zoom
+
+    @zoom.setter
+    def zoom(self, level):
+        with type(self).lock:
+            type(self)._zoom = level
+
+
+class TickerYahoo(TickerGeneric):
+
+    quote_url = "https\\://finance.yahoo.com/quote/"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.data = yfinance.Ticker(self.ticker)
+
+    def fetch(self, percent=False):
+        try:
+            exchange = self.data.info['exchange']
+            period, interval = self.zoom.history
+
+            # account for volatility
+            if self.zoom.level == 'day' and exchange == 'CCC':
+                interval = "5m"
+
+            history = self.data.history(period=period, interval=interval)
+
+            if history.empty is True:
+                raise ValueError("Historical data not found")
+
+            val = history['Close'].iloc[-1]
+
+            if self.zoom.level == 'price':
+                if self.price > 0:
+                    diff = val - self.price
+
+                    if percent:
+                        diff = diff / self.price * 100
+                    elif self.shares > 0:
+                        diff *= self.shares
+                else:
+                    diff = _DIFF_NA
+            else:
+                periods = self.zoom.shift
+
+                # subtract non-trading days
+                if self.zoom.level == 'year' and exchange != 'CCC':
+                    periods -= 116
+                # look back 24h
+                elif self.zoom.level == 'day' and exchange == 'CCC':
+                    periods = 288
+
+                diff = getattr(history['Close'], 'pct_change' if percent else 'diff')(periods=periods).iloc[-2:].iloc[-1]
+
+                if str(diff) == 'nan':
+                    diff = _DIFF_NA
+                elif percent:
+                    diff *= 100
+        except Exception:
+            val, diff = _VAL_ERROR, _DIFF_NA
+
+        self.val, self.diff = val, diff
+
+
+class TickerTotal(TickerGeneric):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self._tickers = []
+        self.queue = Queue()
+        self.threads = _DEFAULT_THREADS
+
+    @property
+    def tickers(self):
+        return self._tickers
+
+    @tickers.setter
+    def tickers(self, tickers):
+        self._tickers = []
+
+        for t in tickers:
+            if not isinstance(t, TickerGeneric):
+                raise TypeError("Invalid ticker object provided")
+            elif not isinstance(t, TickerTotal):
+                self._tickers.append(t)
+
+    def fetch(self, percent=False):
+        for t in self.tickers:
+            self.queue.put(t)
+
+        threads = [Fetcher(self.queue) for _ in range(self.threads)]
+
+        for f in threads:
+            f.daemon = True
+            f.start()
+
+        self.queue.join()
+
+        res = ([], [])
+
+        for t in self.tickers:
+            res[0].append(t.val * (t.shares if t.shares > 0 else 1) if not isinstance(t.val, str) else 0)
+            res[1].append(t.diff if not isinstance(t.diff, str) else 0)
+
+        self.val = sum(res[0])
+
+        if percent:
+            self.diff = sum(res[1]) / self.val * 100
+        else:
+            self.diff = sum(res[1])
+
+
+class Fetcher(Thread):
+
+    def __init__(self, queue):
+        super().__init__()
+
+        self.queue = queue
+
+    def run(self):
+        while True:
+            try:
+                ticker = self.queue.get(timeout=0)
+
+                ticker.fetch(percent=False)
+            except Empty:
+                break
+            else:
+                self.queue.task_done()
+
 
 class Checker(object):
 
-    def __init__(self, tickers, starting_ticker, percent, rounding=_DEFAULT_ROUNDING, padding=_DEFAULT_PADDING, thousand_separator=False, zoom_level=0):
+    def __init__(self, tickers, starting_ticker, percent=False, rounding=_DEFAULT_ROUNDING, padding=_DEFAULT_PADDING, thousand_separator=False, zoom_level=0):
         self.percent = percent
         self.rounding = rounding
         self.padding = padding
         self.k = ',' if thousand_separator else ''
         self.opener = _DEFAULT_OPENER
+        self.threads = _DEFAULT_THREADS
         self.colors = None
         self.current = None
         self.tickers = None
         self.zoom_levels = None
-        self.zoom_current = None
         self.exit = None
         self.skip = False
 
@@ -240,6 +399,14 @@ class Checker(object):
         if not any(t.starting for t in ticker_list):
             raise ConfigError("{} ticker not found in the passed ticker list".format(ticker_zero.ticker))
 
+        for t in ticker_list:
+            if isinstance(t, TickerTotal):
+                if not any(t.price for t in ticker_list):
+                    raise ConfigError("No price per share detected for any ticker")
+
+                t.tickers = ticker_list
+                t.threads = self.threads
+
         self.tickers = cycle(ticker_list)
         self.zoom_levels = cycle(Config(z) for z in _ZOOM_LEVELS)
         self.exit = Event()
@@ -247,7 +414,7 @@ class Checker(object):
         while True:
             self.zoom()
 
-            if self.zoom_current.level == zoom_level:
+            if TickerGeneric.zoom.level == zoom_level:
                 break
 
         while True:
@@ -270,55 +437,10 @@ class Checker(object):
 
         self.colors = Config(colors)
 
-    def fetch(self):
-        period, interval = self.zoom_current.history
-        exchange = self.current.data.info['exchange']
-
-        # account for volatility
-        if self.zoom_current.level == 'day' and exchange == 'CCC':
-            interval = "5m"
-
-        history = self.current.data.history(period=period, interval=interval)
-
-        if history.empty is True:
-            raise ValueError("Historical data not found")
-
-        val = history['Close'].iloc[-1]
-
-        if self.zoom_current.level == 'price':
-            if self.current.price > 0:
-                diff = val - self.current.price
-
-                if self.percent:
-                    diff = diff / self.current.price * 100
-                elif self.current.shares > 0:
-                    diff *= self.current.shares
-            else:
-                diff = _DIFF_NA
-        else:
-            periods = self.zoom_current.shift
-
-            # subtract non-trading days
-            if self.zoom_current.level == 'year' and exchange != 'CCC':
-                periods -= 115
-            # look back 24h
-            elif self.zoom_current.level == 'day' and exchange == 'CCC':
-                periods = 288
-
-            diff = getattr(history['Close'], 'pct_change' if self.percent else 'diff')(periods=periods).iloc[-2:].iloc[-1]
-
-            if str(diff) == 'nan':
-                diff = _DIFF_NA
-            elif self.percent:
-                diff *= 100
-
-        return val, diff
-
     def display(self):
-        try:
-            val, diff = self.fetch()
-        except Exception:
-            val, diff = _VAL_ERROR, _DIFF_NA
+        self.current.fetch(self.percent)
+
+        val, diff = self.current.val, self.current.diff
 
         if isinstance(val, str):
             rounded = val
@@ -334,40 +456,50 @@ class Checker(object):
                 rounded_diff += '%'
 
         if self.colors is None:
-            output = self.zoom_current.format.plain.format(self.current.legend, rounded, rounded_diff)
+            output = TickerGeneric.zoom.format.plain.format(self.current.legend, rounded, rounded_diff)
         else:
             if isinstance(diff, str):
                 diff_color = self.colors.foreground
             else:
                 diff_color = self.colors.gain if diff > 0 else self.colors.loss
 
-            output = self.zoom_current.format.polybar.format(self.opener,
-                                                             _QUOTE_URL + self.current.ticker,
-                                                             self.colors.highlight,
-                                                             self.colors.foreground,
-                                                             self.colors.background,
-                                                             self.colors.background,
-                                                             self.current.legend,
-                                                             self.colors.background,
-                                                             rounded,
-                                                             diff_color,
-                                                             rounded_diff)
+            output_args = [
+                self.colors.highlight,
+                self.colors.foreground,
+                self.colors.background,
+                self.colors.background,
+                self.current.legend,
+                self.colors.background,
+                rounded,
+                diff_color,
+                rounded_diff,
+            ]
+
+            if self.current.quote_url is None:
+                output = TickerGeneric.zoom.format.polybar.format(*output_args)
+            else:
+                output_args = [self.opener, self.current.quote_url + self.current.ticker] + output_args
+
+                output = TickerGeneric.zoom.format.polybar_url.format(*output_args)
 
         sys.stdout.write("{}{:<{padding}}\n".format(output, "", padding=self.padded((self.current.legend, rounded, rounded_diff[1:]))))
         sys.stdout.flush()
 
-    def run(self, delay=_DEFAULT_DELAY, rotate=False):
-        while True:
-            self.exit.clear()
+    def run(self, delay=_DEFAULT_DELAY, rotate=False, one_shot=False):
+        if one_shot:
+            self.display()
+        else:
+            while True:
+                self.exit.clear()
 
-            while not self.exit.is_set():
-                self.display()
-                self.exit.wait(delay)
+                while not self.exit.is_set():
+                    self.display()
+                    self.exit.wait(delay)
 
-                if rotate and not self.skip:
-                    self.cycle()
+                    if rotate and not self.skip:
+                        self.cycle()
 
-                self.skip = False
+                    self.skip = False
 
     def cycle(self, *args):
         self.skip = bool(len(args))
@@ -376,8 +508,20 @@ class Checker(object):
 
     def zoom(self, *args):
         self.skip = bool(len(args))
-        self.zoom_current = next(self.zoom_levels)
+        TickerGeneric.zoom = next(self.zoom_levels)
         self.exit.set()
+
+
+def check_threads(n):
+    try:
+        i = int(n)
+
+        if not 0 < i <= 128:
+            raise ValueError
+    except ValueError:
+        raise argparse.ArgumentTypeError("invalid thread number: {}".format(n))
+
+    return i
 
 
 def main():
@@ -426,6 +570,9 @@ def main():
     parser.add_argument("-t", "--starting-ticker", type=str,
                         default='',
                         help="starting ticker")
+    parser.add_argument("-T", "--threads", type=check_threads,
+                        default=_DEFAULT_THREADS,
+                        help="number of threads to use for TOTAL ticker")
     parser.add_argument("-v", "--version", action='version',
                         version='%(prog)s {0} by {1}'.format(__version__, __author__))
     parser.add_argument("-z", "--zoom-level", type=str, choices=[l['level'] for l in _ZOOM_LEVELS],
@@ -441,20 +588,18 @@ def main():
         args.starting_ticker = args.ticker[0]
 
     checker = Checker(args.ticker, args.starting_ticker, args.percent, args.rounding, args.padding, args.thousand_separator, args.zoom_level)
+    checker.threads = args.threads
 
     if not args.plain:
         checker.decorate(args.background, args.foreground, args.highlight, args.gain, args.loss)
         checker.opener = args.opener
 
-    if not args.one_shot:
-        try:
-            checker.run(args.delay, args.rotate)
-        except KeyboardInterrupt:
-            sys.stderr.write("aborted by the operator\n")
+    try:
+        checker.run(args.delay, args.rotate, args.one_shot)
+    except KeyboardInterrupt:
+        sys.stderr.write("aborted by the operator\n")
 
-            sys.exit(2)
-    else:
-       checker.display()
+        sys.exit(2)
 
 
 if __name__ == "__main__":

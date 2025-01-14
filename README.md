@@ -38,6 +38,7 @@ Supported configuration options:
     - year: `< .. >`
     - 5 years: `| .. |`
     - share price: `> .. <`
+- special `TOTAL` ticker for portfolio tracking
 - thousand separator
 - custom padding
 - custom URL opener
