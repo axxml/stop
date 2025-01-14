@@ -350,10 +350,11 @@ class Fetcher(Thread):
 
 class Checker(object):
 
-    def __init__(self, tickers, starting_ticker, percent=False, rounding=_DEFAULT_ROUNDING, padding=_DEFAULT_PADDING, thousand_separator=False, zoom_level=0):
+    def __init__(self, tickers, starting_ticker, percent=False, rounding=_DEFAULT_ROUNDING, padding=_DEFAULT_PADDING, thousand_separator=False, zoom_level=0, snapshot=False):
         self.percent = percent
         self.rounding = rounding
         self.padding = padding
+        self.snapshot = snapshot
         self.k = ',' if thousand_separator else ''
         self.opener = _DEFAULT_OPENER
         self.threads = _DEFAULT_THREADS
@@ -399,6 +400,10 @@ class Checker(object):
         if not any(t.starting for t in ticker_list):
             raise ConfigError("{} ticker not found in the passed ticker list".format(ticker_zero.ticker))
 
+        if self.snapshot:
+            if not any(isinstance(t, TickerTotal) for t in ticker_list):
+                ticker_list.append(Ticker("TOTAL"))
+
         for t in ticker_list:
             if isinstance(t, TickerTotal):
                 if not any(t.price for t in ticker_list):
@@ -420,6 +425,10 @@ class Checker(object):
         while True:
             self.cycle()
 
+            if self.snapshot:
+                if isinstance(self.current, TickerTotal):
+                    break
+
             if self.current.starting:
                 break
 
@@ -437,10 +446,13 @@ class Checker(object):
 
         self.colors = Config(colors)
 
-    def display(self):
-        self.current.fetch(self.percent)
+    def display(self, ticker=None, fetch=True):
+        current = ticker or self.current
 
-        val, diff = self.current.val, self.current.diff
+        if fetch:
+            current.fetch(self.percent)
+
+        val, diff = current.val, current.diff
 
         if isinstance(val, str):
             rounded = val
@@ -456,7 +468,7 @@ class Checker(object):
                 rounded_diff += '%'
 
         if self.colors is None:
-            output = TickerGeneric.zoom.format.plain.format(self.current.legend, rounded, rounded_diff)
+            output = TickerGeneric.zoom.format.plain.format(current.legend, rounded, rounded_diff)
         else:
             if isinstance(diff, str):
                 diff_color = self.colors.foreground
@@ -475,18 +487,32 @@ class Checker(object):
                 rounded_diff,
             ]
 
-            if self.current.quote_url is None:
+            if current.quote_url is None:
                 output = TickerGeneric.zoom.format.polybar.format(*output_args)
             else:
-                output_args = [self.opener, self.current.quote_url + self.current.ticker] + output_args
+                output_args = [self.opener, current.quote_url + current.ticker] + output_args
 
                 output = TickerGeneric.zoom.format.polybar_url.format(*output_args)
 
-        sys.stdout.write("{}{:<{padding}}\n".format(output, "", padding=self.padded((self.current.legend, rounded, rounded_diff[1:]))))
+        sys.stdout.write("{}{:<{padding}}\n".format(output, "", padding=self.padded((current.legend, rounded, rounded_diff[1:]))))
         sys.stdout.flush()
 
+    def snap(self):
+        self.display()
+
+        sys.stdout.write("===\n")
+        sys.stdout.flush()
+
+        for t in self.current.tickers:
+            if self.percent and not isinstance(t.diff, str):
+                t.diff = t.diff / t.shares / t.price * 100
+
+            self.display(t, fetch=False)
+
     def run(self, delay=_DEFAULT_DELAY, rotate=False, one_shot=False):
-        if one_shot:
+        if self.snapshot:
+            self.snap()
+        elif one_shot:
             self.display()
         else:
             while True:
@@ -567,6 +593,8 @@ def main():
                         help="automatically rotate over tickers")
     parser.add_argument("-s", "--one-shot", action='store_true',
                         help="run once and exit (first ticker only)")
+    parser.add_argument("-S", "--snapshot", action='store_true',
+                        help="take a snapshot")
     parser.add_argument("-t", "--starting-ticker", type=str,
                         default='',
                         help="starting ticker")
@@ -587,7 +615,7 @@ def main():
     if not args.starting_ticker:
         args.starting_ticker = args.ticker[0]
 
-    checker = Checker(args.ticker, args.starting_ticker, args.percent, args.rounding, args.padding, args.thousand_separator, args.zoom_level)
+    checker = Checker(args.ticker, args.starting_ticker, args.percent, args.rounding, args.padding, args.thousand_separator, args.zoom_level, args.snapshot)
     checker.threads = args.threads
 
     if not args.plain:
