@@ -1,6 +1,6 @@
 # stop
 
-Stock position tracker for status bars
+Stock position / portfolio tracker for status bars
 
 ![stop](images/stop.png)
 

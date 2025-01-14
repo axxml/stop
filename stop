@@ -554,7 +554,7 @@ def main():
     if not HAS_YFINANCE:
         raise ConfigError("yfinance (https://github.com/ranaroussi/yfinance) is mandatory for the run")
 
-    parser = argparse.ArgumentParser(description='Stock position tracker for status bars')
+    parser = argparse.ArgumentParser(description='Stock position / portfolio tracker for status bars')
 
     parser.add_argument("-c", "--percent", action='store_true',
                         help="percent change display")
