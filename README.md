@@ -43,6 +43,7 @@ Supported configuration options:
 - thousand separator
 - custom padding
 - custom URL opener
+- configuration file (`~/.config/stop.conf`)
 
 See `stop -h` for more info.
 

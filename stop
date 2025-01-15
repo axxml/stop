@@ -6,6 +6,7 @@ import os
 import signal
 import sys
 
+from configparser import ConfigParser
 from itertools import cycle
 from queue import Empty, Queue
 from threading import Event, Lock, Thread
@@ -23,6 +24,7 @@ __version__ = "0.2.8-dev"  # major.minor.revision-channel
 __author__ = "Axel McLaren <scm@axml.uk>"
 
 
+_DEFAULT_CONFIG = os.path.expanduser("~/.config/stop.conf")
 _DEFAULT_DELAY = 5.0  # seconds
 _DEFAULT_ROUNDING = 2
 _DEFAULT_PADDING = 4
@@ -37,6 +39,32 @@ _DEFAULT_OPENER = "xdg-open"
 _DEFAULT_THREADS = 8
 
 _BASE_WIDTH = 24  # 7-char ticker + 6.2-digit value + 3.2-digit diff + 2 thousand separators
+
+_CONFIG_FORMAT = {
+    'general': {
+        'percent': bool,
+        'delay': float,
+        'thousand_separator': bool,
+        'opener': str,
+        'plain': bool,
+        'rounding': int,
+        'padding': int,
+        'rotate': bool,
+        'one_shot': bool,
+        'snapshot': bool,
+        'starting_ticker': str,
+        'threads': int,
+        'zoom_level': str,
+    },
+    'colors': {
+        'background': str,
+        'foreground': str,
+        'highlight': str,
+        'gain': str,
+        'loss': str,
+    },
+    'tickers': (),
+}
 
 _FORMAT_PLAIN_VAL = "{} {} "
 _FORMAT_POLYBAR_VAL = "%{{B{}}}%{{F{}}}%{{u{}}}%{{+u}}%{{o{}}}%{{+o}} {} %{{-o}}%{{-u}}%{{F-}}%{{B-}}%{{B{}}} {} "
@@ -139,6 +167,43 @@ class Config(object):
             raise RuntimeError("Can't modify read-only config setting: {}".format(k))
 
 
+class ConfigFile(object):
+
+    def __init__(self, f):
+        self.config = ConfigParser()
+        self.settings = argparse.Namespace(tickers=[])
+
+        try:
+            c = self.config.read(f)
+        except Exception as e:
+            raise ConfigError(e)
+        else:
+            if c:
+                self.parse()
+            elif id(f) != id(_DEFAULT_CONFIG):
+                raise ConfigError("unable to open configuration file: {}".format(f))
+
+    def parse(self):
+        for section in _CONFIG_FORMAT:
+            if section in ('general', 'colors'):
+                if self.config.has_section(section):
+                    try:
+                        [setattr(self.settings, o, self.get(section, o, _CONFIG_FORMAT[section][o])) for o in self.config.options(section)]
+                    except KeyError as e:
+                        raise ConfigError("unsupported setting: {}".format(e))
+            elif section == 'tickers':
+                if self.config.has_section(section):
+                    setattr(self.settings, section, [':'.join((o.upper(), self.config.get(section, o))) for o in self.config.options(section)])
+
+    def get(self, s, o, t=str):
+        type_map = {'str': '', 'float': 'float', 'int': 'int', 'bool': 'boolean'}
+
+        try:
+            return getattr(self.config, 'get' + type_map[t.__name__])(s, o)
+        except ValueError:
+            raise ConfigError("invalid setting value ({}): {}".format(t.__name__, o))
+
+
 class Ticker(object):
 
     def __new__(cls, desc, *args, **kwargs):
@@ -155,7 +220,7 @@ class Ticker(object):
     def parse(desc):
         ti = desc.split(':', 3)
 
-        ticker = ti[0]
+        ticker = ti[0].split('.', 1)[0]
 
         if len(ti) == 1:
             legend = ticker
@@ -174,6 +239,14 @@ class Ticker(object):
                 legend, price, shares = ti[1], ti[2], 0
         elif len(ti) == 4:
             ticker, legend, price, shares = ti
+
+        # empty ticker
+        if not ticker:
+            raise ConfigError("Ticker value can not be empty")
+
+        # empty legend
+        if not legend:
+            legend = ticker
 
         try:
             price = float(price)
@@ -406,7 +479,7 @@ class Checker(object):
 
         for t in ticker_list:
             if isinstance(t, TickerTotal):
-                if not any(t.price for t in ticker_list):
+                if not any(t.price for t in ticker_list) and zoom_level == 'price':
                     raise ConfigError("No price per share detected for any ticker")
 
                 t.tickers = ticker_list
@@ -428,8 +501,7 @@ class Checker(object):
             if self.snapshot:
                 if isinstance(self.current, TickerTotal):
                     break
-
-            if self.current.starting:
+            elif self.current.starting:
                 break
 
     def decorate(self, bg, fg, hl, ga, lo):
@@ -504,7 +576,7 @@ class Checker(object):
         sys.stdout.flush()
 
         for t in self.current.tickers:
-            if self.percent and not isinstance(t.diff, str):
+            if t.price > 0 and self.percent and not isinstance(t.diff, str):
                 t.diff = t.diff / t.shares / t.price * 100
 
             self.display(t, fetch=False)
@@ -561,6 +633,9 @@ def main():
     parser.add_argument("-d", "--delay", type=float,
                         default=_DEFAULT_DELAY,
                         help="delay between checks")
+    parser.add_argument("-f", "--config-file", type=str,
+                        default=_DEFAULT_CONFIG,
+                        help="configuration file")
     parser.add_argument("-bg", "--background", type=str,
                         default=_DEFAULT_COLOR['background'],
                         help="background color")
@@ -606,16 +681,26 @@ def main():
     parser.add_argument("-z", "--zoom-level", type=str, choices=[l['level'] for l in _ZOOM_LEVELS],
                         default=_ZOOM_LEVELS[0]['level'],
                         help="starting zoom level")
-    parser.add_argument("ticker", type=str, nargs='+',
+    parser.add_argument("ticker", type=str, nargs='*',
                         metavar='TICKER[:LEGEND][:PRICE-PER-SHARE[:SHARES]]',
                         help="ticker list")
 
     args = parser.parse_args()
 
-    if not args.starting_ticker:
-        args.starting_ticker = args.ticker[0]
+    config = ConfigFile(args.config_file)
 
-    checker = Checker(args.ticker, args.starting_ticker, args.percent, args.rounding, args.padding, args.thousand_separator, args.zoom_level, args.snapshot)
+    # merge config settings
+    args = parser.parse_args(namespace=config.settings)
+
+    tickers = args.ticker or args.tickers
+
+    if not tickers:
+        raise ConfigError("no tickers specified")
+
+    if not args.starting_ticker:
+        args.starting_ticker = tickers[0]
+
+    checker = Checker(tickers, args.starting_ticker, args.percent, args.rounding, args.padding, args.thousand_separator, args.zoom_level, args.snapshot)
     checker.threads = args.threads
 
     if not args.plain:
