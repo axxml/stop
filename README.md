@@ -43,7 +43,12 @@ Supported configuration options:
 - thousand separator
 - custom padding
 - custom URL opener
-- configuration file (`~/.config/stop.conf`)
+- configuration file (`~/.config/stop.conf`):
+
+    ```
+    [tickers]
+    <ticker>: [[<legend>:]<price-per-share>:<shares>]
+    ```
 
 See `stop -h` for more info.
 
