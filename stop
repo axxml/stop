@@ -399,10 +399,12 @@ class TickerTotal(TickerGeneric):
         if self.val == 0:
             self.diff = 0
         else:
+            diff_sum = sum(res[1])
+
             if percent:
-                self.diff = sum(res[1]) / self.val * 100
+                self.diff = diff_sum / (self.val + abs(diff_sum)) * 100
             else:
-                self.diff = sum(res[1])
+                self.diff = diff_sum
 
 
 class Fetcher(Thread):
