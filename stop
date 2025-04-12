@@ -736,6 +736,9 @@ def main():
     checker.threads = args.threads
 
     if not args.plain:
+        if args.snapshot:
+            raise ConfigError("snapshot can be taken only in plaintext mode")
+
         checker.decorate(args.background,
                          args.foreground,
                          args.highlight,
