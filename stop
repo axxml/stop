@@ -39,6 +39,7 @@ _DEFAULT_OPENER = "xdg-open"
 _DEFAULT_THREADS = 8
 
 _BASE_WIDTH = 24  # 7-char ticker + 6.2-digit value + 3.2-digit diff + 2 thousand separators
+_CONCEAL_CHAR = '•'
 
 _CONFIG_FORMAT = {
     'general': {
@@ -428,11 +429,12 @@ class Fetcher(Thread):
 
 class Checker(object):
 
-    def __init__(self, tickers, starting_ticker, percent=False, rounding=_DEFAULT_ROUNDING, padding=_DEFAULT_PADDING, thousand_separator=False, zoom_level=0, snapshot=False):
+    def __init__(self, tickers, starting_ticker, percent=False, rounding=_DEFAULT_ROUNDING, padding=_DEFAULT_PADDING, thousand_separator=False, zoom_level=0, snapshot=False, conceal=False):
         self.percent = percent
         self.rounding = rounding
         self.padding = padding
         self.snapshot = snapshot
+        self.conceal = conceal
         self.k = ',' if thousand_separator else ''
         self.opener = _DEFAULT_OPENER
         self.threads = _DEFAULT_THREADS
@@ -457,6 +459,18 @@ class Checker(object):
     @property
     def rounded_diff(self):
         return '{{:+{k}.{:d}f}}'.format(self.rounding, k=self.k)
+
+    def concealed(self, ticker, value, diff=False):
+        def conceal():
+            return '{}{}.{}{}'.format(value[0] if diff else '', *((_CONCEAL_CHAR,) * 3))
+
+        if self.conceal:
+            if not diff and isinstance(ticker, TickerTotal):
+                return conceal()
+            elif diff and not self.percent and (isinstance(ticker, TickerTotal) or ticker.zoom.level == 'price'):
+                return conceal()
+
+        return value
 
     def padded(self, s):
         padding = _BASE_WIDTH + self.padding - sum(map(len, list(map(str, s))))
@@ -545,7 +559,9 @@ class Checker(object):
                 rounded_diff += '%'
 
         if self.colors is None:
-            output = TickerGeneric.zoom.format.plain.format(current.legend, rounded, rounded_diff)
+            output = TickerGeneric.zoom.format.plain.format(current.legend,
+                                                            self.concealed(current, rounded),
+                                                            self.concealed(current, rounded_diff, True))
         else:
             if isinstance(diff, str):
                 diff_color = self.colors.foreground
@@ -559,9 +575,9 @@ class Checker(object):
                 self.colors.background,
                 self.current.legend,
                 self.colors.background,
-                rounded,
+                self.concealed(current, rounded),
                 diff_color,
-                rounded_diff,
+                self.concealed(current, rounded_diff, True),
             ]
 
             if current.quote_url is None:
@@ -571,7 +587,9 @@ class Checker(object):
 
                 output = TickerGeneric.zoom.format.polybar_url.format(*output_args)
 
-        sys.stdout.write("{}{:<{padding}}\n".format(output, "", padding=self.padded((current.legend, rounded, rounded_diff[1:]))))
+        sys.stdout.write("{}{:<{padding}}\n".format(output, "", padding=self.padded((current.legend,
+                                                                                     self.concealed(current, rounded),
+                                                                                     self.concealed(current, rounded_diff[1:], True)))))
         sys.stdout.flush()
 
     def snap(self):
@@ -635,6 +653,8 @@ def main():
 
     parser.add_argument("-c", "--percent", action='store_true',
                         help="percent change display")
+    parser.add_argument("-C", "--conceal", action='store_true',
+                        help="conceal calculated value")
     parser.add_argument("-d", "--delay", type=float,
                         default=_DEFAULT_DELAY,
                         help="delay between checks")
@@ -705,11 +725,22 @@ def main():
     if not args.starting_ticker:
         args.starting_ticker = tickers[0]
 
-    checker = Checker(tickers, args.starting_ticker, args.percent, args.rounding, args.padding, args.thousand_separator, args.zoom_level, args.snapshot)
+    checker = Checker(tickers, args.starting_ticker,
+                               args.percent,
+                               args.rounding,
+                               args.padding,
+                               args.thousand_separator,
+                               args.zoom_level,
+                               args.snapshot,
+                               args.conceal)
     checker.threads = args.threads
 
     if not args.plain:
-        checker.decorate(args.background, args.foreground, args.highlight, args.gain, args.loss)
+        checker.decorate(args.background,
+                         args.foreground,
+                         args.highlight,
+                         args.gain,
+                         args.loss)
         checker.opener = args.opener
 
     try:

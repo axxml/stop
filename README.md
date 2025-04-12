@@ -42,6 +42,7 @@ Supported configuration options:
     - snapshot mode
 - thousand separator
 - custom padding
+- value concealment
 - custom URL opener
 - configuration file (`~/.config/stop.conf`):
 
